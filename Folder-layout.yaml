@@ -36,7 +36,7 @@ meta:
 conventions:
   area_folder: "{jd}{letter} {name}" # "30-39D Documents"
   category_folder: "{jd} {name}" # "32 Income & Employment"
-  item_folder: "{jd} {name}" # "32.01 Schneider Electric"
+  item_folder: "{jd} {name}" # "32.01 Acme Corp"
 
   id_format: kebab-case # slugs: permanent, lowercase, ASCII, shell-safe
   date_format: "YYYY-MM-DD"
