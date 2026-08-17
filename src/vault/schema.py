@@ -41,6 +41,11 @@ class FieldDef:
     def is_list(self) -> bool:
         return isinstance(self.type, str) and self.type.startswith("list[")
 
+    @property
+    def is_date(self) -> bool:
+        # `type` may be a list for union fields, so compare rather than look up.
+        return self.type == "date"
+
 
 @dataclass(frozen=True)
 class TypeDef:
@@ -122,20 +127,83 @@ class Schema:
             if f.is_link
         }
 
+    def is_derivable(self, type_id: str, key: str) -> bool:
+        """True if `import.derived` declares where this field's value comes from.
+
+        Used only in --import mode: a legacy record missing `note_type` is not
+        a defect if the schema already says the value is a constant.
+        """
+        declared = {d["field"] for d in self.imports.get("derived", [])}
+        return f"{type_id}.{key}" in declared or f"*.{key}" in declared
+
     def machine(self, type_id: str) -> dict[str, Any] | None:
         for m in self.lifecycle.get("machines", []):
             if m["type"] == type_id:
                 return m
         return None
 
+    # -- placement ---------------------------------------------------------
+
+    def folder_for_path(self, relative: str) -> FolderDef | None:
+        """Deepest path segment that names a known category.
+
+        `11.01 Paint Line` is an item folder, not a category, so it is skipped
+        and `11 Work Projects` is returned.
+        """
+        by_jd = {f.jd: f for f in self.folders.values()}
+        found = None
+        for segment in Path(relative).parts[:-1]:
+            token = segment.split(" ", 1)[0]
+            if token in by_jd:
+                found = by_jd[token]
+        return found
+
+    def expected_folder(self, record: Any) -> str | None:
+        """Folder id a record should live in, or None when unconstrained.
+
+        Returns None for container-relative routing — a document with
+        `attaches_to`, or any world-entry — because those live inside another
+        record's folder rather than in a category.
+        """
+        type_id = record.type
+        if not type_id or type_id not in self.types:
+            return None
+        if record.has("attaches_to") or type_id == "world-entry":
+            return None
+
+        for explicit in self.routing_overrides:
+            if explicit.get("type") != type_id or "map" not in explicit:
+                continue
+            return explicit["map"].get(record.get(explicit["routes_by"]))
+
+        if type_id == "area":
+            return record.id
+
+        subtype_field = self.subtype_field(type_id)
+        key = record.get(subtype_field) if subtype_field else type_id
+        return self.route(key) if isinstance(key, str) else None
+
+    @property
+    def routing_overrides(self) -> list[dict[str, Any]]:
+        return self.raw_types.get("routing", {}).get("explicit", [])
+
+    def subtype_add_keys(self, subtype_field: str) -> set[str]:
+        """Every field any value of this vocabulary contributes."""
+        return {
+            key
+            for adds in self.subtype_adds.get(subtype_field, {}).values()
+            for key in adds
+        }
+
     # -- loading -----------------------------------------------------------
 
     @classmethod
     def load(cls, directory: Path | str) -> Schema:
         root = Path(directory)
-        t_raw = _read(root / TYPES_FILE)
-        l_raw = _read(root / LAYOUT_FILE)
+        return cls.from_dicts(_read(root / TYPES_FILE), _read(root / LAYOUT_FILE))
 
+    @classmethod
+    def from_dicts(cls, t_raw: dict[str, Any], l_raw: dict[str, Any]) -> Schema:
         universal = {f["key"]: _field(f) for f in t_raw["universal"]}
 
         types: dict[str, TypeDef] = {}

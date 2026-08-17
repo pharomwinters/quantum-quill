@@ -15,9 +15,15 @@ from typing import Callable
 class Scope(Enum):
     """How much context a rule needs to decide."""
 
-    SCHEMA = "schema"   # the two YAML files against each other
-    RECORD = "record"   # one record, in isolation
-    CORPUS = "corpus"   # needs the index: duplicates, backlinks, counts
+    SCHEMA = "schema"       # the two YAML files against each other
+    RECORD = "record"       # one record, in isolation
+    CORPUS = "corpus"       # needs the index: duplicates, backlinks, counts
+    MUTATION = "mutation"   # needs a before AND an after
+
+    # MUTATION exists because two declared rules — `illegal-transition` and
+    # `id-changed` — cannot be decided by looking at a record at rest. A scan
+    # sees only the after. They are registered and tested, but a scan skips
+    # them; the app calls them when it writes.
 
 
 @dataclass(frozen=True)
@@ -56,3 +62,12 @@ class Registry:
 
 
 RULES = Registry()
+"""Rules declared in `types.yaml`. A test asserts this matches, both ways."""
+
+SCHEMA_RULES = Registry()
+"""Consistency checks on the two YAML files themselves.
+
+Deliberately a separate registry: these are not declared in `types.yaml`,
+because a schema that declared the rules for checking itself would have no
+outside vantage point. They are code-owned, and the code says so.
+"""
