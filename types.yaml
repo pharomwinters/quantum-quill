@@ -1,0 +1,1518 @@
+# =============================================================================
+#  TYPES — the schema half of the typed PIM
+# =============================================================================
+#
+#  Folder-layout.yaml says WHERE a record lives. This file says WHAT it is.
+#
+#  A record is a markdown file: frontmatter is the data, the body is whatever
+#  prose belongs with it. For a note the body is the point; for a document the
+#  body is commentary and `file:` points at the payload beside it.
+#
+#  Every record carries a permanent `id` slug. Links point at ids, so renaming,
+#  retitling, moving and archiving never break a reference. A SQLite index may
+#  be built over all of this for query speed — derived, disposable, and never
+#  the source of truth.
+#
+#  58 type names in the layout collapse here to 12 core types and 50 subtype
+#  values. Adding a new kind of document is a vocabulary edit, not a schema
+#  change.
+#
+# =============================================================================
+
+meta:
+  name: vault
+  version: 1
+  updated: 2026-08-17
+  companion: Folder-layout.yaml
+
+# -----------------------------------------------------------------------------
+#  PROVENANCE — how much of this file is evidence and how much is a bet
+# -----------------------------------------------------------------------------
+#
+#  The schema was written before most of the material it describes exists, so
+#  it does not carry uniform authority and should not pretend to. Every type,
+#  vocabulary and state machine is marked, so the parts worth holding loosely
+#  are visible without re-deriving which is which.
+
+provenance_levels:
+  derived: >
+    Real material CONTRADICTED the original design and changed it. Strongest
+    evidence — the schema is shaped by the data rather than merely compatible
+    with it.
+  confirmed: >
+    Real material exercised it and it held unchanged. Good evidence, but note
+    that surviving is weaker than correcting: it may only mean the material
+    never pushed hard enough.
+  provisional: >
+    No real instance. An informed bet, uncontradicted because untested.
+    Expect it to be wrong in ways nothing here can predict.
+
+provenance_review:
+  trigger: first-instance
+  rule: >
+    When the first real record of a provisional type is created, or the first
+    real use of a provisional vocabulary value, re-read that definition
+    against it before creating a second. That is the cheapest moment to be
+    wrong, and the only reliable one.
+
+# -----------------------------------------------------------------------------
+#  CONVENTIONS
+# -----------------------------------------------------------------------------
+
+conventions:
+  record_file: "{title}.md"
+  dated_record_file: "{date} {title}.md" # journal, meeting, document
+  container_record_file: "{title}.md" # inside its own folder
+
+  id_derivation: >
+    slugify(title) at creation. On collision, append the record's primary date,
+    then an incrementing suffix. Once written the id is immutable — retitling a
+    record leaves it alone, which is the whole point.
+
+  body: >
+    Everything below the frontmatter. Never parsed for data. A record with an
+    empty body is valid; a record with no frontmatter is not a record.
+
+# -----------------------------------------------------------------------------
+#  FIELD TYPES
+# -----------------------------------------------------------------------------
+
+field_types:
+  text: Single line of plain text.
+  longtext: Multi-line prose. Markdown permitted.
+  slug: A kebab-case identifier. Used for `id` and for link targets.
+  date: Calendar date, YYYY-MM-DD. No time component, no timezone.
+  datetime: Instant, ISO 8601 with offset.
+  number: Integer or decimal.
+  money: Decimal amount plus a currency code.
+  bool: true / false.
+  enum: One value from a named closed vocabulary. Declared with `of:`.
+  link: Reference to another record by id. Constrained with `to:`.
+  folder: Reference to a folder id from Folder-layout.yaml.
+  file: Relative path to a binary sitting in the same folder as the record.
+  list: Repeated values of a single type. Declared as `list[<type>]`.
+  union: >
+    Two or more permitted types, written as a list. Used where a field is
+    migrating from one representation to another — see `person.organization`.
+
+# -----------------------------------------------------------------------------
+#  UNIVERSAL FIELDS — present on every record of every type
+# -----------------------------------------------------------------------------
+
+universal:
+  - key: id
+    type: slug
+    required: true
+    immutable: true
+    description: >
+      Permanent identity. Generated once at creation and never changed by any
+      operation, including retitling, moving and archiving.
+
+  - key: type
+    type: enum
+    of: core_type
+    required: true
+    description: One of the twelve core types below.
+
+  - key: title
+    type: text
+    derived_from: filename
+    description: >
+      Display name, taken from the filename. NOT a required frontmatter field:
+      0 of 129 real records carried one, because in a file-based system the
+      filename already is the title, and demanding a copy creates two sources
+      of truth that drift. Present in frontmatter only as a deliberate
+      override. Free to change; `id` does not follow it.
+
+  - key: created
+    type: date
+    required: true
+    system: true
+    description: Stamped at creation. Never hand-edited.
+
+  - key: updated
+    type: date
+    system: true
+    description: Stamped on write.
+
+  - key: archived_on
+    type: date
+    system: true
+    description: >
+      Set when the record is archived; null means live. Deliberately separate
+      from any type's `status`: archiving is a universal operation about
+      location and attention, while status is domain state. A project can be
+      `done` and not yet archived, and a person can be archived without ever
+      having had a status at all — which is why every area has a 9N
+      counterpart but only five types have a state machine.
+
+  - key: related
+    type: "list[link]"
+    to: "*"
+    inverse: related
+    symmetric: true
+    description: >
+      Untyped association to any other record. The escape hatch — when a
+      connection has no more specific field, it goes here. Its own inverse:
+      if A is related to B, B is related to A, and the index makes the
+      reverse edge visible without it being written into B's file.
+
+  - key: tags
+    type: list[text]
+    description: >
+      Free-form labels. Deliberately unvalidated: the closed vocabularies
+      carry the meaning, and tags carry everything not worth formalising.
+
+# -----------------------------------------------------------------------------
+#  ROUTING — which folder a record belongs in
+# -----------------------------------------------------------------------------
+#
+#  Types do not name folders. Folder-layout.yaml already declares `types:` per
+#  category, listing SUBTYPE values, so the routing table is that file read in
+#  reverse. Two types route on something other than a subtype and declare it
+#  explicitly here.
+
+routing:
+  derived_from_layout:
+    types: [document, resource, note, system, journal, meeting, task, person, organization, group, world]
+    rule: >
+      Look up the record's subtype value (or, for types with no subtype, the
+      type id) in the layout's category `types:` lists. Exactly one category
+      must match. Zero matches or more than one is a schema defect, not a
+      record defect — validate the two files against each other, not the note.
+
+  explicit:
+    - type: project
+      routes_by: scope
+      map:
+        work: work-projects
+        personal: personal-projects
+        creative: creative-projects
+
+    - type: area
+      routes_by: id
+      rule: >
+        An area record's id must equal the id of a category in area 20-29, and
+        it lives inside that category. The record IS the description of the
+        responsibility the folder holds.
+
+    - type: document
+      when: attaches_to is set
+      routes_by: attaches_to
+      relative_to: container
+      rule: >
+        A document attached to a project, area or world lives inside that
+        container's folder rather than its doc_type category. With
+        `attaches_to` empty it routes normally by doc_type. 63 of 114 real
+        binaries are already filed this way, and moving them into 30-39
+        would separate a PFMEA from the project it analyses.
+
+    - type: world-entry
+      routes_by: appears_in
+      relative_to: container
+      rule: >
+        Entries live inside the folder of the world they appear in — a
+        container-relative destination rather than a category. The world is a
+        container record under 13 Creative Projects; its entries sit beneath
+        it, optionally grouped into subfolders by entry_type. This is the one
+        routing shape that resolves against another record instead of against
+        Folder-layout.yaml.
+
+# -----------------------------------------------------------------------------
+#  CONTAINERS
+# -----------------------------------------------------------------------------
+#
+#  Two types own a folder rather than merely sitting in one. The record's id
+#  and the folder's id are the same string, so archiving moves both and every
+#  inbound reference survives untouched.
+
+containers:
+  types: [project, area, world]
+  rule: >
+    A container record lives at the root of the folder it names. Its id must
+    equal that folder's id in Folder-layout.yaml. Everything else in the tree
+    is a plain file.
+
+# -----------------------------------------------------------------------------
+#  CORE TYPES
+# -----------------------------------------------------------------------------
+
+types:
+  # ===========================================================================
+  - id: project
+    name: Project
+    kind: container
+    subtype: null
+    provenance: derived
+    evidence:
+      records: 4
+      changed: ["outcome -> result", "kept start/end over project_start/project_end"]
+      gap: "scope missing on 4 of 4 — a required field nothing has"
+    description: >
+      A short-term effort with a deadline and a definition of done. If it
+      cannot finish, it is an area.
+    fields:
+      - { key: status, type: enum, of: project_status, required: true }
+      - { key: scope, type: enum, of: scope, required: true }
+      # Real projects use `project_start` / `project_end`. That prefix only
+      # existed to dodge a flat frontmatter namespace shared by every type —
+      # a tool artifact, not a distinction — so the schema drops it.
+      - { key: start, type: date }
+      - { key: end, type: date }
+      - key: result
+        type: longtext
+        description: >
+          Written at completion, not at creation. An empty result on a
+          finished project is the single most common thing worth chasing.
+          Named `result` because 4 of 4 real projects and 14 of 14 real
+          meetings already call it that, and there is no principled reason
+          to prefer the word I invented.
+      - { key: serves, type: "list[link]", to: area, inverse: projects }
+
+  # ===========================================================================
+  - id: area
+    name: Area of Responsibility
+    kind: container
+    subtype: null
+    provenance: provisional
+    evidence:
+      records: 0
+      note: >
+        PARA's Areas do not exist in any real material. Seven categories in
+        20-29 and a three-state machine, all invented. The most speculative
+        type in the file.
+    description: >
+      An ongoing responsibility with a standard to maintain and no end date.
+      Areas own no documents; documents in 30-39 point AT them via `serves`.
+    fields:
+      - key: status
+        type: enum
+        of: area_status
+        required: true
+        description: >
+          Areas do end — a property sold, a matter closed, a dependant grown.
+          The layout has always had `92 Archived Areas`; the type had no way
+          to get there. Found by writing the lifecycle rules, not by design.
+      - key: standard
+        type: longtext
+        required: true
+        description: >
+          What "maintained" means for this area, in a sentence. Required
+          because an area without a standard is just a folder name.
+      - { key: review_cadence, type: enum, of: cadence }
+
+  # ===========================================================================
+  - id: document
+    name: Document
+    kind: payload
+    subtype: doc_type
+    provenance: derived
+    evidence:
+      records: 0
+      binaries: 114
+      changed: ["definition widened from 'about you' to 'about you or by you'",
+                "+attaches_to, +supersedes, +snapshot_of",
+                "+6 doc_types, +category 39"]
+      note: >
+        Derived from binaries, not from records — no document record has ever
+        existed. The SHAPE is evidence-backed; the field semantics are not.
+    description: >
+      A file with metadata — issued TO you or produced BY you. The binary is
+      the payload; the markdown carries the metadata and any commentary.
+
+      The original definition said "a record about you", which a survey of 114
+      real binaries broke immediately: 63 of them are work products — PFMEA
+      analyses, trackers, SAP exports, amp-hour reports — with exactly the
+      same shape (date, author, revision, supersession) and none of the eight
+      personal categories able to hold them. The shape was right; the
+      definition was too narrow.
+    fields:
+      - key: file
+        type: file
+        required: true
+        description: Relative path to the payload, in the same folder.
+      - { key: doc_type, type: enum, of: doc_type, required: true }
+      - { key: doc_date, type: date, required: true }
+      - key: attaches_to
+        type: link
+        to: [project, area, world]
+        inverse: filed_here
+        description: >
+          The container this document belongs to. When set, the document
+          lives inside that container's folder rather than its doc_type
+          category — which is where 63 of 114 real binaries already sit.
+      - { key: issuer, type: link, to: [organization, person], inverse: issued }
+      - { key: party, type: "list[link]", to: [organization, person], inverse: documents }
+      - key: revision
+        type: text
+        description: >
+          Text, not a number — engineering rev letters ("Rev C") and dotted
+          versions ("2.1") both have to work.
+      - { key: status, type: enum, of: doc_status }
+      - key: supersedes
+        type: link
+        to: document
+        inverse: superseded_by
+        description: >
+          The revision this one replaces. Chains a version history without
+          encoding it in filenames.
+      - key: snapshot_of
+        type: link
+        to: document
+        inverse: snapshots
+        description: >
+          Marks this file as a point-in-time backup of another document
+          rather than a revision in its own right. 10 of the 14 real PFMEA
+          files are exactly this — "backup before guide columns", "backup
+          before severity guide" — and counting them as revisions would
+          inflate a four-revision history into fourteen.
+      - { key: serves, type: "list[link]", to: area, inverse: documents }
+
+  # ===========================================================================
+  - id: resource
+    name: Resource
+    kind: reference
+    subtype: resource_type
+    provenance: derived
+    evidence:
+      records: 29
+      changed: ["+plan subtype for implementation-plan/improvement-plan x5"]
+      open: >
+        3 real resources carry a `status` (stub, in-progress, done) that this
+        type has no field for. Unresolved — see `open_questions`.
+    description: >
+      Reference material — something you consult. Nothing here is dated
+      evidence and nothing here is irreplaceable. If it has a party and a
+      signature, it is a document.
+    fields:
+      - { key: resource_type, type: enum, of: resource_type, required: true }
+      - { key: source, type: text }
+      - { key: url, type: text }
+      - { key: topic, type: "list[text]" }
+
+  # ===========================================================================
+  - id: person
+    name: Person
+    kind: people
+    subtype: null
+    provenance: derived
+    evidence:
+      records: 15
+      changed: ["dropped full_name", "relationship required -> required-on-create",
+                "organization widened to link|text"]
+      note: >
+        The type that changed most under testing, and the only one that now
+        conforms outright. Before those three edits it failed 15 of 15.
+    description: One record per human.
+    fields:
+      - key: relationship
+        type: "list[enum]"
+        of: relationship
+        required: on-create
+        description: >
+          Multi-valued. The field that earned Contacts a cross-cutting area —
+          a colleague you also know socially is both, and asking for it is
+          what stops the distinction degrading back into folders. Required
+          when creating a record, but only a WARN on records that predate the
+          schema: 0 of 15 real person notes carry it, and 15 judgment calls
+          is a backfill task, not an import blocker.
+      - { key: email, type: "list[text]" }
+      - { key: phone, type: "list[text]" }
+      - key: organization
+        type: [link, text]
+        to: organization
+        inverse: people
+        description: >
+          A link once the organisation has a record of its own, plain text
+          until then. All 15 real person notes store the employer as a string
+          and no organization record exists anywhere, so demanding a link
+          would block every single import.
+      - { key: role, type: text }
+      - { key: met, type: date }
+
+  # ===========================================================================
+  - id: organization
+    name: Organization
+    kind: people
+    subtype: null
+    provenance: provisional
+    evidence:
+      records: 0
+      note: >
+        Zero organization records exist, yet 15 person records name an
+        employer as text and six link fields point here. The first real one
+        will decide whether this type is right; until then every inverse on
+        it is theoretical.
+    description: A company, institution, vendor or practice.
+    fields:
+      - { key: org_type, type: enum, of: org_type }
+      - { key: website, type: text }
+      - { key: industry, type: text }
+
+  # ===========================================================================
+  - id: group
+    name: Group
+    kind: people
+    subtype: null
+    provenance: provisional
+    evidence: { records: 0 }
+    description: >
+      A named, persisting collection of people — a team, a household, a
+      committee. A record with members, not a folder of person files.
+    fields:
+      - { key: members, type: "list[link]", to: person, required: true, inverse: groups }
+      - { key: purpose, type: text }
+
+  # ===========================================================================
+  - id: note
+    name: Note
+    kind: written
+    subtype: note_type
+    provenance: confirmed
+    evidence:
+      records: 18
+      note: >
+        Held unchanged. `note_type` was missing on 17 of 18, but a constant
+        default resolved it without touching the type — friction at import,
+        not a defect in the shape.
+    description: >
+      Written by you, not dated, not a meeting, not a task. The default
+      destination for anything that does not obviously belong elsewhere.
+    fields:
+      - { key: note_type, type: enum, of: note_type, required: true }
+      - key: source
+        type: link
+        to: resource
+        inverse: notes
+        description: >
+          For literature notes — the material being read. Authorship is the
+          line: theirs in 43/46, yours here.
+
+  # ===========================================================================
+  - id: journal
+    name: Journal Entry
+    kind: written
+    subtype: period
+    provenance: derived
+    evidence:
+      records: 6
+      changed: ["+period subtype — the type could not represent a weekly at all"]
+    description: >
+      A dated entry. The date IS the identity, so capture requires no title
+      and no filing decision. Daily and weekly are ONE type with different
+      periods — the old vault made them two separate types only because it
+      had no subtype mechanism, which is a tool artifact rather than a real
+      distinction.
+    fields:
+      - { key: period, type: enum, of: period, required: true }
+      - key: date
+        type: date
+        required: true
+        unique: true
+        description: >
+          The anchor date. For a weekly, the Monday the week starts on.
+
+  # ===========================================================================
+  - id: meeting
+    name: Meeting
+    kind: written
+    subtype: null
+    provenance: derived
+    evidence:
+      records: 14
+      changed: ["outcome -> result"]
+      gap: "`date` missing on 14 of 14 — real meetings only carry `created`"
+    description: >
+      Notes from a conversation with other people. Attendees are links, so a
+      person's meeting history assembles itself with no extra bookkeeping.
+    fields:
+      - { key: date, type: date, required: true }
+      - { key: attended, type: "list[link]", to: person, required: true, inverse: meetings }
+      - { key: agenda, type: longtext }
+      - { key: result, type: longtext }
+
+  # ===========================================================================
+  - id: task
+    name: Task
+    kind: written
+    subtype: null
+    provenance: derived
+    evidence:
+      records: 30
+      changed: ["project -> projects (list)", "+deferred state"]
+      confirms: >
+        `completed` was invented while writing the lifecycle rules, before
+        any task had been examined. 24 of 30 real tasks already carry
+        `completedDate`. The rare case of a bet arriving pre-validated.
+    description: >
+      One record per task, held centrally rather than filed under a project —
+      a task links to its project, and location would only duplicate what the
+      link already says. Tasks routinely serve more than one.
+
+      Import note: the 30 real tasks are identified by a `#task` TAG and carry
+      no `type` field at all. Import stamps `type: task` from the tag; a
+      tagged file with no type is an import candidate, not a defect.
+    fields:
+      - { key: state, type: enum, of: task_state, required: true }
+      - { key: priority, type: enum, of: priority }
+      - { key: due, type: date }
+      - { key: scheduled, type: date }
+      - key: completed
+        type: date
+        system: true
+        description: >
+          Stamped on the transition into `done`. Without it "what did I finish
+          last week" is unanswerable, since `updated` moves on every edit.
+      - key: projects
+        type: "list[link]"
+        to: project
+        inverse: tasks
+        description: >
+          Plural. Real tasks already carry a `projects` list — a task raised
+          in a meeting commonly serves both the meeting's project and its
+          own, and a single link would force a choice reality does not make.
+      - { key: blocked_by, type: "list[link]", to: task, inverse: blocks }
+
+  # ===========================================================================
+  - id: world
+    name: World
+    kind: container
+    subtype: null
+    provenance: confirmed
+    evidence:
+      records: 1
+      note: >
+        One record. "Confirmed" on a sample of one is barely a claim — the
+        creative side was planned and never built.
+    description: >
+      A fictional setting. A container like a project, and it lives among the
+      creative projects because that is where the real one already lives —
+      but it is not a project: it has no deadline and never finishes.
+    fields:
+      - { key: status, type: enum, of: project_status, required: true }
+      - { key: setting, type: longtext }
+
+  # ===========================================================================
+  - id: world-entry
+    name: World Entry
+    kind: written
+    subtype: entry_type
+    provenance: confirmed
+    evidence:
+      records: 1
+      note: >
+        One entry (a polity) against 23 declared entry_types. The vocabulary
+        came from template filenames, not from entries — so the TYPE held,
+        while 22 of its 23 values remain untested.
+    description: >
+      One element of a fictional setting — a character, a polity, a deity, a
+      region. Not a note: an entry has an in-world existence, belongs to
+      exactly one world, and is one of a closed set of kinds. Collapsing the
+      23 kinds into freeform tags would make "every deity in Empire"
+      unanswerable and leave nothing to validate.
+    fields:
+      - { key: entry_type, type: enum, of: entry_type, required: true }
+      - key: appears_in
+        type: link
+        to: world
+        required: true
+        inverse: entries
+        description: >
+          The world this entry belongs to. Also its routing key — entries
+          live inside their world's folder.
+
+  # ===========================================================================
+  - id: system
+    name: System Artifact
+    kind: system
+    subtype: system_type
+    provenance: provisional
+    evidence:
+      records: 0
+      note: "The app that would create these does not exist yet."
+    description: >
+      The app's own furniture — saved views, record templates, generated
+      reports. Lives in 00-09 and is never personal content.
+    fields:
+      - { key: system_type, type: enum, of: system_type, required: true }
+
+# -----------------------------------------------------------------------------
+#  VOCABULARIES
+# -----------------------------------------------------------------------------
+#
+#  Every one is closed: a value outside its list is an ERROR. Subtype values
+#  may declare `adds:` — fields that exist only for that subtype.
+
+vocabularies:
+  # --- the type register itself ------------------------------------------
+  core_type:
+    provenance: derived
+    evidence: "grew 12 -> 14; world and world-entry added by real records"
+    closed: true
+    values: [project, area, document, resource, person, organization, group,
+             note, journal, meeting, task, world, world-entry, system]
+
+  # --- shared enums ------------------------------------------------------
+  scope:
+    provenance: provisional
+    evidence: "1 use across 129 records, and missing on all 4 real projects"
+    closed: true
+    values: [work, personal, creative]
+
+  project_status:
+    provenance: confirmed
+    evidence: "active x4. Only one of the four values has ever been used."
+    closed: true
+    values: [active, on-hold, done, cancelled]
+
+  doc_status:
+    provenance: provisional
+    evidence: { records: 0 }
+    closed: true
+    values: [active, superseded, archived]
+
+  area_status:
+    provenance: provisional
+    evidence: { records: 0 }
+    closed: true
+    values: [active, dormant, closed]
+    note: >
+      Not `project_status`. An area cannot be "done" — that is what makes it
+      an area. It can go quiet (dormant) or genuinely end (closed).
+
+  task_state:
+    provenance: derived
+    evidence: "done x24, deferred x4, in-progress x2; `deferred` added"
+    closed: true
+    values: [open, in-progress, blocked, deferred, done, cancelled]
+    note: >
+      `deferred` added by evidence — 4 of 30 real tasks use it, and it is
+      genuinely distinct from both blocked (something else is in the way) and
+      cancelled (never happening). Real usage is done x24, deferred x4,
+      in-progress x2; `open`, `blocked` and `cancelled` are unattested,
+      `open` presumably because it is the unwritten default.
+
+  priority:
+    provenance: provisional
+    evidence: "the field is used on real tasks; its values were not surveyed"
+    closed: true
+    values: [low, normal, high]
+
+  cadence:
+    provenance: provisional
+    evidence: { records: 0 }
+    closed: true
+    values: [weekly, monthly, quarterly, annually]
+
+  relationship:
+    provenance: provisional
+    evidence: "0 of 15 person records carry it — the whole vocabulary is a bet"
+    closed: true
+    multi: true
+    values: [family, friend, colleague, client, vendor, acquaintance, professional]
+
+  org_type:
+    provenance: provisional
+    evidence: { records: 0 }
+    closed: true
+    values: [employer, client, vendor, institution, practice, other]
+
+  # --- subtype: document -------------------------------------------------
+  doc_type:
+    parent: document
+    provenance: derived
+    evidence:
+      binaries: 114
+      confirmed_values: [spec, paystub, resume, cover-letter, offer-letter,
+                         claim, medical-record, insurance-policy, correspondence]
+      added_values: [quote, certificate, analysis, dataset, report, register]
+      note: >
+        9 of 35 values confirmed by real files, 6 added by them, and the
+        remaining 20 provisional. Treat any unlisted value as a bet.
+    closed: true
+    values:
+      # 31 Identity & Vital Records
+      - id: identity-document
+        name: Identity Document
+      - id: vital-record
+        name: Vital Record
+
+      # 32 Income & Employment
+      - id: paystub
+        name: Paystub
+        adds:
+          - { key: gross, type: money }
+          - { key: net, type: money }
+          - { key: pay_period, type: text }
+      - id: w2
+        name: W-2
+        adds:
+          - { key: tax_year, type: number }
+      - id: offer-letter
+        name: Offer Letter
+      - id: employment-contract
+        name: Employment Contract
+
+      # 33 Tax & Statements
+      - id: tax-return
+        name: Tax Return
+        adds:
+          - { key: tax_year, type: number }
+          - { key: jurisdiction, type: text }
+      - id: bank-statement
+        name: Bank Statement
+      - id: brokerage-statement
+        name: Brokerage Statement
+      - id: invoice
+        name: Invoice
+
+      # 34 Insurance & Medical
+      - id: insurance-policy
+        name: Insurance Policy
+        adds:
+          - { key: policy_number, type: text }
+          - { key: carrier, type: link, to: organization, inverse: policies }
+          - { key: coverage_start, type: date }
+          - { key: coverage_end, type: date }
+      - id: claim
+        name: Claim
+      - id: medical-record
+        name: Medical Record
+
+      # 35 Property & Vehicle
+      - id: deed
+        name: Deed
+      - id: lease
+        name: Lease
+        adds:
+          - { key: term_start, type: date }
+          - { key: term_end, type: date }
+          - { key: rent, type: money }
+      - id: title
+        name: Title
+      - id: registration
+        name: Registration
+      - id: service-record
+        name: Service Record
+        adds:
+          - { key: odometer, type: number }
+          - { key: vendor, type: link, to: organization, inverse: services }
+
+      # 36 Legal & Correspondence
+      - id: filing
+        name: Filing
+        adds:
+          - { key: case, type: text }
+          - { key: court, type: text }
+          - { key: filed_on, type: date }
+      - id: correspondence
+        name: Correspondence
+      - id: contract
+        name: Contract
+
+      # 37 Career Materials
+      - id: resume
+        name: Resume
+        adds:
+          - key: target
+            type: text
+            description: >
+              Which role or employer this variant was tailored for. A field,
+              deliberately — tailored versions are records, not subfolders.
+      - id: cover-letter
+        name: Cover Letter
+      - id: portfolio
+        name: Portfolio
+      - id: certificate
+        name: Certificate
+        adds:
+          - { key: issued_by, type: link, to: organization, inverse: certificates }
+          - { key: expires, type: date }
+      - id: performance-review
+        name: Performance Review
+        adds:
+          - { key: period, type: text }
+          - { key: rating, type: text }
+
+      # 38 Purchases, Warranties & Licenses
+      - id: quote
+        name: Quote
+        adds:
+          - { key: amount, type: money }
+          - { key: valid_until, type: date }
+        note: >
+          Not an invoice. A quote proposes work at a price; an invoice
+          demands payment for work done. Four real files forced the split.
+      - id: receipt
+        name: Receipt
+      - id: warranty
+        name: Warranty
+      - id: manual
+        name: Manual
+      - id: software-license
+        name: Software License
+        adds:
+          - { key: product, type: text }
+          - { key: seats, type: number }
+          - { key: license_key, type: text, sensitive: true }
+
+      # 39 Work Products — produced by you, usually attached to a container.
+      # 35 real spreadsheets forced this group into existence; none of 31-38
+      # could hold a PFMEA, an amp-hour report or a SAP export.
+      - id: analysis
+        name: Analysis
+        note: PFMEA, root-cause, failure study. Authored, revised, superseded.
+      - id: dataset
+        name: Dataset
+        note: Exports and raw data pulls — SAP work orders, asset lists.
+      - id: report
+        name: Report
+        note: A periodic or one-off summary. Amp hours, downtime, throughput.
+      - id: register
+        name: Register
+        note: >
+          A living list maintained over time — trackers, skills matrices,
+          equipment inventories. Distinguished from a dataset by being
+          edited rather than regenerated.
+
+  # --- subtype: resource -------------------------------------------------
+  resource_type:
+    parent: resource
+    provenance: derived
+    evidence:
+      records: 29
+      in_use: { reference: 17, implementation-plan: 4, design-spec: 3,
+                A3: 1, document_hub: 1, improvement-plan: 1 }
+      confirmed_values: [reference, spec]
+      added_values: [plan]
+      migrations:
+        design-spec: spec
+        implementation-plan: plan
+        improvement-plan: plan
+        A3: "document / analysis — a root-cause study is produced, not consulted"
+        document_hub: "system / view — it is a dashboard, not a resource"
+      note: >
+        Only `reference` is strongly attested. The other 13 values were
+        invented and remain untested.
+    closed: true
+    values:
+      # 41 Technical Reference
+      - { id: reference, name: Reference }
+      - { id: spec, name: Specification }
+      - { id: cheat-sheet, name: Cheat Sheet }
+      # 42 Design Assets
+      - { id: asset, name: Asset }
+      - { id: brand-book, name: Brand Book }
+      - { id: ui-kit, name: UI Kit }
+      # 43 Learning
+      - { id: course-note, name: Course Note }
+      - { id: textbook, name: Textbook }
+      - { id: tutorial, name: Tutorial }
+      # 44 Document Templates
+      - { id: document-template, name: Document Template }
+      # 45 Guides & Runbooks
+      - { id: guide, name: Guide }
+      - { id: runbook, name: Runbook }
+      - id: plan
+        name: Plan
+        note: >
+          Added by evidence: `implementation-plan` x4 and `improvement-plan`
+          x1 exist as real resource_type values with nowhere to route. A plan
+          is a guide to work not yet done, which is why it sits beside
+          runbooks rather than under specs.
+        adds:
+          - { key: plan_for, type: link, to: [project, area], inverse: plans }
+      # 46 Research & Clippings
+      - { id: article, name: Article }
+      - { id: paper, name: Paper }
+      - { id: clipping, name: Clipping }
+
+  # --- subtype: journal --------------------------------------------------
+  period:
+    parent: journal
+    provenance: derived
+    evidence: "daily x4, weekly x2 — both values attested"
+    closed: true
+    values:
+      - id: daily
+        name: Daily
+      - id: weekly
+        name: Weekly
+        adds:
+          - { key: week_start, type: date }
+          - { key: week_end, type: date }
+
+  # --- subtype: world-entry ----------------------------------------------
+  entry_type:
+    parent: world-entry
+    provenance: provisional
+    evidence:
+      records: 1
+      in_use: [polity]
+      note: >
+        22 of 23 values untested. The vocabulary was read off template
+        filenames — evidence of what was PLANNED, not of what gets written.
+    closed: true
+    values:
+      # figures
+      - { id: character, name: Character }
+      - { id: family, name: Family }
+      - { id: stat-card, name: Stat Card }
+      # polities & bodies
+      - { id: polity, name: Polity }
+      # NOTE: `organization` is also a core type. No collision — subtype
+      # vocabularies are namespaced by their parent, so `type: organization`
+      # (a real company) and `type: world-entry / entry_type: organization`
+      # (a fictional one) never meet.
+      - { id: organization, name: Organization }
+      # places
+      - { id: region, name: Region }
+      - { id: settlement, name: Settlement }
+      - { id: landmark, name: Landmark }
+      # culture & belief
+      - { id: culture, name: Culture }
+      - { id: deity, name: Deity }
+      - { id: faith, name: Faith }
+      - { id: myth, name: Myth }
+      - { id: truth, name: Truth }
+      - { id: tradition, name: Tradition }
+      - { id: profession, name: Profession }
+      - { id: title, name: Title }
+      # things & nature
+      - { id: item, name: Item }
+      - { id: species, name: Species }
+      - { id: material, name: Material }
+      # history & narrative
+      - { id: event, name: Event }
+      - { id: conflict, name: Conflict }
+      - { id: lore, name: Lore }
+      - { id: prose, name: Prose }
+
+  # --- subtype: note -----------------------------------------------------
+  note_type:
+    parent: note
+    provenance: confirmed
+    evidence: "18 records, all plain notes. literature-note and draft untested."
+    closed: true
+    values:
+      - { id: note, name: Note } # 63 — the plain case
+      - { id: literature-note, name: Literature Note } # 65
+      - { id: draft, name: Draft } # 66
+
+  # --- subtype: system ---------------------------------------------------
+  system_type:
+    parent: system
+    provenance: provisional
+    evidence: { records: 0 }
+    closed: true
+    values:
+      - { id: view, name: Saved View } # 03
+      - { id: template, name: Record Template } # 04
+      # Named `audit`, not `report`: doc_type gained a `report` for authored
+      # work reports, and two categories claiming the same routing key is
+      # ambiguous. The app's own output is an audit; yours is a report.
+      - { id: audit, name: Audit Report } # 05
+
+# -----------------------------------------------------------------------------
+#  DOCUMENT STUBS
+# -----------------------------------------------------------------------------
+
+stubs:
+  policy: opt-in
+  rationale: >
+    Binaries are indexed by path, filename and embedded metadata whether or
+    not a stub exists, so nothing is ever unfindable. A stub is created when
+    you actually want fields on a file. Twelve real records beat a hundred
+    and twenty empty ones.
+
+  bulk_assist:
+    description: >
+      Where a directory of binaries carries parseable filenames, offer to
+      generate stubs for the batch with the parsed fields pre-filled. Always
+      previewed before writing, never automatic.
+    example:
+      pattern: "{doc_date} {issuer} Paystub.pdf"
+      produces: { type: document, doc_type: paystub, doc_date: parsed, issuer: parsed }
+
+  never_stub:
+    - reason: Sensitive folders are metadata-only by layout rule.
+      folders: [identity-vital, insurance-medical, legal-correspondence]
+      note: >
+        Stubs may be authored by hand here, but never generated in bulk and
+        never from parsed content.
+
+# -----------------------------------------------------------------------------
+#  LIFECYCLE — legal transitions, what they require, and what they DO
+# -----------------------------------------------------------------------------
+#
+#  Everything above describes a record at rest. This describes how it changes.
+#  Without it, each of `archiving preserves the key`, `an empty result on a
+#  finished project is worth chasing` and `a superseded document points at its
+#  successor` lives only in prose, and two implementations could honour them
+#  differently while both claiming to match the schema.
+
+lifecycle:
+  principle: >
+    A transition is legal, required-complete, and effectful. Guards may block
+    or merely warn — the distinction matters, because a project with three
+    open tasks is usually finishable and occasionally a mistake, and the
+    schema should say which without deciding for you.
+
+  # --- the universal operation -------------------------------------------
+  archive:
+    applies_to: "*"
+    trigger: explicit, or automatic on entering a terminal state
+    effects:
+      - stamp: archived_on
+      - move_to: "9N — the archive category mirroring the source area"
+      - preserve: [id, jd]
+      - keep: inverses
+    rules:
+      - >
+        The id never changes. Every inbound link survives archiving, which is
+        the entire payoff of slug keys over path or title identity.
+      - >
+        Inbound links stay valid but raise `link-to-archived-record` as a
+        WARN, so a live record depending on an archived one is visible
+        without being forbidden.
+      - >
+        Container contents move WITH their container. A document with
+        `attaches_to` set lives inside the container's folder, so archiving a
+        project carries its documents automatically — no cascade needed,
+        because location already encodes the relationship.
+    reversible: true
+    unarchive: clears archived_on, restores to the mirrored source category
+
+  # --- state machines ----------------------------------------------------
+  machines:
+    - type: project
+      field: status
+      provenance: provisional
+      evidence: >
+        All 4 real projects are `active`. Not one transition has ever
+        happened, so every rule below is untested — including the guard that
+        counts open tasks.
+      initial: active
+      terminal: [done, cancelled]
+      transitions:
+        - { from: active, to: on-hold }
+        - { from: on-hold, to: active }
+        - from: active
+          to: done
+          requires: [result, end]
+          guards:
+            - check: "tasks where state in [open, in-progress, blocked] is empty"
+              severity: warn
+              message: "{n} task(s) still open on this project"
+              note: >
+                Uses the `tasks` inverse from the query contract. A warn, not
+                a block — finishing a project with loose ends is a real and
+                usually deliberate act.
+          effects: [archive]
+        - from: [active, on-hold]
+          to: cancelled
+          requires: [result]
+          effects: [archive]
+        - { from: [done, cancelled], to: active, note: "reopening; clears archived_on" }
+
+    - type: area
+      field: status
+      provenance: provisional
+      evidence: "0 records. Both the field and the machine were invented here."
+      initial: active
+      terminal: [closed]
+      transitions:
+        - { from: active, to: dormant }
+        - { from: dormant, to: active }
+        - from: [active, dormant]
+          to: closed
+          guards:
+            - check: "projects where status == active is empty"
+              severity: error
+              message: "cannot close an area with active projects"
+              note: >
+                An ERROR rather than a warn, because a project serving a
+                closed area is genuinely incoherent — unlike a loose task.
+          effects: [archive]
+
+    - type: document
+      field: status
+      provenance: provisional
+      evidence: >
+        0 document records. The supersession chain is inferred from the 14
+        PFMEA files, which express it through filenames rather than fields —
+        suggestive, not evidence.
+      initial: active
+      terminal: [archived]
+      transitions:
+        - from: active
+          to: superseded
+          requires_index: "superseded_by is not empty"
+          note: >
+            The requirement is checked against the INDEX, not the file: a
+            document becomes superseded when some other document declares
+            `supersedes` pointing at it. You cannot mark a document
+            superseded by nothing.
+          effects: []
+        - { from: [active, superseded], to: archived, effects: [archive] }
+      snapshots:
+        rule: >
+          A record with `snapshot_of` set follows its parent's status and has
+          no independent lifecycle. The 10 PFMEA backups are not four more
+          revisions to manage.
+
+    - type: task
+      field: state
+      provenance: derived
+      evidence: >
+        30 real tasks with real state values and a real `completedDate`.
+        The only machine in this file with evidence behind it.
+      initial: open
+      terminal: [done, cancelled]
+      transitions:
+        - { from: open, to: [in-progress, blocked, deferred, done, cancelled] }
+        - { from: in-progress, to: [open, blocked, deferred, done, cancelled] }
+        - { from: blocked, to: [open, in-progress, deferred, cancelled] }
+        - from: deferred
+          to: [open, in-progress, cancelled]
+          note: >
+            Deferred is a decision, not an obstacle — it leaves only when you
+            pick it back up or give it up. It cannot go straight to done.
+        - from: [open, in-progress]
+          to: blocked
+          requires: [blocked_by]
+          note: Blocked by nothing is not blocked.
+        - from: [open, in-progress, blocked]
+          to: done
+          effects:
+            - stamp: completed
+            - unblock: "tasks listing this one in blocked_by"
+          note: >
+            Completing a task releases whatever it blocked — via the `blocks`
+            inverse. Dependents move to `open`, never straight to done.
+        - { from: [done, cancelled], to: open, note: "reopening; clears completed" }
+      archive: >
+        Tasks are archived in batches rather than individually — a done task
+        is finished, not filed. Archiving moves them to 96.
+
+    - type: world
+      field: status
+      provenance: provisional
+      evidence: "1 record, never transitioned."
+      initial: active
+      terminal: [done, cancelled]
+      note: >
+        Reuses `project_status`. `on-hold` reads as dormant and `done` as
+        "the story is told" — a world can be finished even though it has no
+        deadline. Provisional: no real world has ever changed state.
+      transitions:
+        - { from: active, to: on-hold }
+        - { from: on-hold, to: active }
+        - from: [active, on-hold]
+          to: [done, cancelled]
+          guards:
+            - check: "entries is empty"
+              severity: warn
+              message: "{n} entries still attached"
+          effects: [archive]
+
+  # --- types with no machine ---------------------------------------------
+  stateless:
+    types: [resource, person, organization, group, note, journal, meeting,
+            world-entry, system]
+    rule: >
+      No status field and no transitions. They are created, edited and
+      eventually archived via `archived_on` alone. A meeting does not have
+      states; it happened.
+    system_note: >
+      System artifacts are stateless but not archived either — an audit is
+      superseded by the next run and deleted, a view is edited in place. They
+      are the one group with no 9N destination, which is correct: 00-09 has
+      no archive counterpart and does not need one.
+
+# -----------------------------------------------------------------------------
+#  QUERY CONTRACT
+# -----------------------------------------------------------------------------
+#
+#  What the schema GUARANTEES is answerable. This exists so the query layer is
+#  defined by the schema rather than by whatever the first app happened to
+#  implement — the failure mode this whole rebuild is a reaction to.
+#
+#  The contract cuts both ways:
+#    * Anything declared here, an implementation MUST support.
+#    * Anything NOT declared here is not guaranteed, and no feature may be
+#      built on the assumption that it is.
+
+query:
+  # --- what a query is ---------------------------------------------------
+  form: declarative-tree
+  form_note: >
+    A query is data, not a string. No parser beyond a tree walker, diffable
+    in git, and a saved view is simply a record whose frontmatter is the
+    query. A string syntax may later be added as sugar that compiles to this
+    tree; the tree stays canonical.
+
+  shape:
+    from: "<core type, list of types, or '*'>"
+    where: "<condition tree>"
+    group_by: "<field>"
+    sort: "[{ field, dir: asc|desc }]"
+    limit: "<n>"
+    select: "[fields] — omitted means the whole record"
+
+  example: |
+    from: document
+    where:
+      and:
+        - { field: doc_type, in: [paystub, w2] }
+        - { field: doc_date, gte: "2026-01-01" }
+        - { field: attaches_to, is: null }
+    group_by: issuer
+    sort: [{ field: doc_date, dir: desc }]
+    limit: 50
+
+  # --- operators ---------------------------------------------------------
+  operators:
+    logical: [and, or, not]
+    equality: [eq, ne, in, not_in]
+    ordering: [gt, gte, lt, lte] # dates and numbers
+    text: [contains, starts_with, ends_with]
+    presence: [is] # is: null | not_null
+    edge: [links_to, linked_from] # traverse a link field in either direction
+
+  # --- special values ----------------------------------------------------
+  values:
+    self: >
+      The record the view is embedded in. What makes one `person-hub` view
+      definition serve every person instead of being copied per record.
+    today: Current date, evaluated at query time.
+
+  # --- index classes -----------------------------------------------------
+  #  What the index MUST maintain. Every field below is guaranteed queryable
+  #  at speed; anything omitted is a scan and must not be relied on.
+  indexes:
+    - class: unique
+      fields: [id]
+    - class: exact
+      fields: [type, folder, status, state, priority, scope]
+      subtypes: [doc_type, resource_type, note_type, period, entry_type, system_type]
+      note: Every closed vocabulary is exact-indexed. That is what closing it buys.
+    - class: range
+      fields: [created, updated, doc_date, date, due, scheduled, start, end,
+               met, coverage_start, coverage_end, expires, valid_until,
+               week_start, week_end, filed_on, tax_year, amount, gross, net]
+    - class: edge
+      fields: all-link-fields
+      bidirectional: true
+      note: >
+        Both directions of all 18 link fields. This is the index that makes
+        named inverses real — without it they are just documentation.
+    - class: text
+      fields: [title, body, tags]
+      excludes: sensitive-folders
+      note: >
+        Full-text over the typed zone only. Records in folders marked
+        `sensitive` are indexed by metadata alone — their bodies are never
+        read, so they are findable by title and never by content.
+
+  # --- reverse traversal -------------------------------------------------
+  inverses:
+    storage: index-only
+    rule: >
+      An inverse is never written into a file. `meeting.attended` lives in the
+      meeting; `person.meetings` exists only in the index. One direction is
+      authored, the other is derived, and they can never disagree.
+    read_only: true
+    uniqueness: >
+      An inverse name must be unique on its TARGET type, not globally. `area`
+      receives three — `projects` from project.serves, `documents` from
+      document.serves, `filed_here` from document.attaches_to — and all three
+      had to be distinct even though two come from the same source type.
+
+    by_target:
+      area: [projects, documents, filed_here, plans]
+      person: [meetings, issued, documents, groups]
+      organization: [people, issued, documents, policies, services, certificates]
+      project: [tasks, filed_here, plans]
+      world: [entries, filed_here]
+      document: [superseded_by, snapshots]
+      task: [blocks]
+      resource: [notes]
+      "*": [related]
+
+  # --- what is NOT queryable ---------------------------------------------
+  excluded:
+    - subject: bulk zone
+      queryable: [path, filename, extension, size, embedded metadata]
+      not_queryable: [fields]
+      rationale: >
+        Bulk-zone files have no fields. Media and tool folders are searchable
+        by name and by what the file itself carries (EXIF, ID3), never by
+        schema fields — because there are none to carry.
+
+    - subject: sensitive folders
+      queryable: [title, filename, type, subtype, dates]
+      not_queryable: [body, extracted content]
+      rationale: >
+        Enforces the layout's `sensitive-not-scanned` rule at the query
+        layer, so it cannot be bypassed by building a search feature.
+
+    - subject: record body
+      queryable: [full-text presence]
+      not_queryable: [structure, headings, embedded blocks]
+      rationale: >
+        The body is prose, never parsed for data. Querying its structure
+        would make it a second schema competing with frontmatter — which is
+        exactly how the previous system drifted.
+
+# -----------------------------------------------------------------------------
+#  IMPORT — where required fields come from for records that predate the schema
+# -----------------------------------------------------------------------------
+#
+#  Measured 2026-08-17 against 88 real records (129 live files, sensitive zones
+#  excluded, templates excluded). The counts are what each rule actually has to
+#  cover, not estimates. Every field below was found missing by that test —
+#  none of it was anticipated in the original design.
+
+import:
+  derived:
+    - field: "*.id"
+      source: slugify(filename)
+      covers: 88
+      note: >
+        Generated for every record. Not a defect — no file-based system
+        carries an explicit id, which is exactly why one has to be minted
+        rather than read.
+
+    - field: meeting.date
+      source: created
+      covers: 14
+      note: >
+        Real meetings carry only `created`. Usually the same day, but not
+        always — a meeting written up the next morning has a true date and a
+        later `created`. The schema keeps them distinct and seeds one from
+        the other rather than collapsing them the way the old tool did.
+
+    - field: journal.date
+      source: filename
+      covers: 6
+      note: Dailies are `YYYY-MM-DD-[W]WW-DDD`; weeklies are `YYYY-Www`.
+
+    - field: journal.period
+      source: legacy `type` value (daily | weekly)
+      covers: 6
+
+    - field: note.note_type
+      source: constant `note`
+      covers: 17
+
+    - field: task.type
+      source: "`#task` tag"
+      covers: 30
+      note: Tasks carry no type field at all; the tag is the only signal.
+
+  manual:
+    description: >
+      Required fields no rule can derive. This list is the entire human cost
+      of the import — 21 decisions, of which only 6 are blocking.
+    fields:
+      - { field: project.scope, count: 4, severity: error }
+      - { field: resource.resource_type, count: 2, severity: error }
+      - { field: person.relationship, count: 15, severity: warn }
+
+  binary_survey:
+    measured: 2026-08-17
+    corpus: 114
+    method: >
+      Filenames, extensions and containing folders only. No file contents
+      opened; five sensitive directories excluded from the walk entirely.
+    findings:
+      - { defect: container-attached-documents, count: 63,
+          fix: "`attaches_to` field + container-relative routing override" }
+      - { defect: work-products-with-no-category, count: 35,
+          fix: "doc_type += analysis, dataset, report, register; category 39" }
+      - { defect: quote-conflated-with-invoice, count: 4,
+          fix: "doc_type += quote" }
+      - { defect: certificate-missing, count: 1,
+          fix: "doc_type += certificate" }
+      - { defect: manual-version-backups, count: 10,
+          fix: "`snapshot_of` field — 14 files were only 4 revisions" }
+      - { defect: attachment-bundles-in-typed-zone, count: 13,
+          fix: "layout: named subfolders permitted inside containers" }
+      - { defect: routing-key-collision, count: 1,
+          fix: "system_type `report` renamed `audit`" }
+      - { defect: duplicate-files, count: 2,
+          fix: "none needed — rule one-item-one-place already covers it" }
+    confirmed_correct:
+      values: [spec, paystub, resume, cover-letter, offer-letter, claim,
+               medical-record, insurance-policy, correspondence]
+      note: >
+        These routed cleanly with no resistance across 40-odd real files.
+        Everything else in doc_type remains provisional — invented, and not
+        yet contradicted by anything.
+
+  conforms_already:
+    types: [person, world, world-entry]
+    note: >
+      Nothing missing beyond the generated id. `person` only reached this
+      state because the reality test moved `relationship` from required to
+      required-on-create and dropped `full_name` — before those two edits it
+      failed 15 of 15.
+
+# -----------------------------------------------------------------------------
+#  VALIDATION
+# -----------------------------------------------------------------------------
+
+validation:
+  error:
+    - missing-required-field
+    - value-outside-closed-vocabulary
+    - unresolvable-link
+    - malformed-date
+    - duplicate-id
+    - id-changed # `id` is immutable; a changed one is corruption, not an edit
+    - wrong-folder # record's type/subtype not accepted by its category
+    - container-id-mismatch # project/area/world record id != its folder id
+    - subtype-field-on-wrong-subtype # e.g. `gross` on a deed
+    - world-entry-without-world # `appears_in` missing or unresolvable
+    - illegal-transition # a state change no machine permits
+    - transition-requirement-unmet # e.g. `done` with no `result`
+    - blocked-task-without-blocker # `blocked` and `blocked_by` empty
+    - area-closed-with-active-projects
+    - superseded-without-successor # nothing declares `supersedes` at it
+
+  warn:
+    - missing-payload # `file:` points at a binary that isn't there
+    - link-to-archived-record
+    - empty-field-normally-filled
+    - finished-project-without-result
+    - person-without-relationship # required on create, warned on imports
+    - organization-as-text # a person's employer that has no record yet
+    - project-done-with-open-tasks
+    - world-archived-with-entries
+    - terminal-record-not-archived # done/cancelled but still live
+
+  info:
+    - orphan # no links in either direction
+    - stale # untouched beyond a threshold
+    - untyped-binary # a file in the typed zone with no stub
+    - first-instance-of-provisional # triggers the provenance review
+
+# -----------------------------------------------------------------------------
+#  OPEN QUESTIONS — known gaps, deliberately not guessed at
+# -----------------------------------------------------------------------------
+
+open_questions:
+  - id: resource-status
+    raised: 2026-08-17
+    question: Should `resource` carry a status field?
+    evidence: >
+      3 of 29 real resources carry one — `stub`, `in-progress`, `done`. The
+      type has no such field, so those values would be dropped on import.
+    why_unresolved: >
+      Thin and mixed evidence. `stub` describes completeness, `in-progress`
+      describes work, `done` could mean either — three records is not enough
+      to tell which axis is real, and inventing a fourth status vocabulary on
+      a guess is exactly the habit this schema exists to break.
+    unblocks: import of 3 records
+    decide_by: first real use of a `plan` resource, which will have a status or not

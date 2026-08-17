@@ -1,0 +1,889 @@
+# =============================================================================
+#  FOLDER LAYOUT — the folder half of the typed PIM schema
+# =============================================================================
+#
+#  Johnny Decimal for addressing, PARA for the top of the typed zone.
+#
+#  Every folder is a row with a permanent slug `id`. The `jd` number is an
+#  address, not a key — it can be reallocated without breaking a single
+#  reference. Records point at `id`. Folders relate to each other by `id`.
+#  This is what makes renumbering, moving and archiving safe operations.
+#
+#  Companion file: types.yaml — what a record IS (fields, validation).
+#  This file  — where a record LIVES (folders, routing, filing rules).
+#
+# =============================================================================
+
+meta:
+  name: vault
+  version: 1
+  convention: johnny-decimal + para
+  updated: 2026-08-17
+
+  # SET ME — absolute path to the tree root.
+  root: null
+
+# Provenance levels are defined in types.yaml. In this file the marker sits on
+# each AREA and answers one question: does real material live here today?
+#   derived     — real material forced a change to this area
+#   confirmed   — real material lives here and the shape held
+#   provisional — nothing here yet
+
+# -----------------------------------------------------------------------------
+#  CONVENTIONS — how names and numbers are formed
+# -----------------------------------------------------------------------------
+
+conventions:
+  area_folder: "{jd}{letter} {name}" # "30-39D Documents"
+  category_folder: "{jd} {name}" # "32 Income & Employment"
+  item_folder: "{jd} {name}" # "32.01 Schneider Electric"
+
+  id_format: kebab-case # slugs: permanent, lowercase, ASCII, shell-safe
+  date_format: "YYYY-MM-DD"
+
+  # Display names may use any characters (&, accents, spaces). The slug is the
+  # shell-safe handle, so the name never has to be sanitised.
+  name_charset: unrestricted
+
+# -----------------------------------------------------------------------------
+#  ZONES — how far the type layer reaches
+# -----------------------------------------------------------------------------
+
+zones:
+  typed:
+    description: >
+      The app owns the schema here. Every file is a record of a declared type
+      with validated fields. Grouping is done by FIELDS, not folders — so a
+      typed category holds numbered item folders and nothing else. No ad-hoc
+      subfolders, because anything a subfolder would say, a field says better
+      and queryably.
+    subfolders: numbered-items-only
+    indexed: full
+    exception:
+      inside_containers: named
+      rule: >
+        The rule binds CATEGORY folders. Inside a container item — a project,
+        area or world folder — named subfolders are allowed. Real work
+        generates attachment bundles with no identity of their own: 13
+        evidence photos grouped as `stage3_issues/` belong to one record, not
+        to 13 records. Forbidding it would force 13 meaningless ids or push
+        the photos out of the project they document.
+
+  bulk:
+    description: >
+      Addressable but untyped. These files have no meaningful fields — an ISO
+      has no author, a backup set has no subject — so folders are the only
+      organisation available and plain named subfolders are allowed. The app
+      lists, searches and links them; it does not schematise them.
+    subfolders: named
+    indexed: path-and-metadata
+
+# -----------------------------------------------------------------------------
+#  RULES — the invariants the app enforces
+# -----------------------------------------------------------------------------
+
+rules:
+  - id: x0-reserved
+    statement: >
+      Category `x0` in every area is reserved for that area's own meta —
+      its index, its README, its working files. Content categories run
+      x1 through x9. This guarantees every area has a consistent home for
+      describing itself.
+
+  - id: stable-single-valued-partitions
+    statement: >
+      A category may partition only by an attribute that is stable and
+      single-valued. Scope (work / personal / creative) qualifies: a project
+      is exactly one of them, for its whole life. Relationship (family /
+      friend / colleague) does not: people are several at once and change
+      over time. Multi-valued or changeable attributes are FIELDS.
+    rationale: >
+      Encoding a multi-valued attribute in a path forces a false choice at
+      filing time and makes the obvious query — "friends who are also
+      colleagues" — unanswerable.
+
+  - id: numbers-never-reused
+    statement: >
+      A retired JD number is never reassigned. It moves to `tombstones`
+      with the id it used to address, so an old reference resolves to an
+      explanation rather than to the wrong thing.
+
+  - id: archive-mirrors-source
+    statement: >
+      Archive category `9N` receives everything from area `N0-N9`.
+      Computable, so no lookup table: area 30-39 archives to 93.
+
+  - id: archiving-preserves-key
+    statement: >
+      Archiving changes `parent` and sets `status: archived`. It never
+      changes `id`. Every reference to a project survives its archival —
+      which is the entire reason keys are slugs and not numbers.
+
+  - id: one-item-one-place
+    statement: >
+      A file lives in exactly one folder. Everything else — every
+      cross-cutting view, every "this is also relevant to X" — is a
+      relation, expressed by id.
+
+  - id: sensitive-not-scanned
+    statement: >
+      Folders marked `sensitive: true` are indexed by path and filename
+      only. No content extraction, no preview or thumbnail generation, no
+      full-text search, no AI processing.
+
+# -----------------------------------------------------------------------------
+#  AREAS
+# -----------------------------------------------------------------------------
+
+areas:
+  # ===========================================================================
+  - id: system
+    jd: "00-09"
+    letter: S
+    name: System & Index
+    provenance: provisional
+    provenance_note: >
+      Nothing here yet. The app that fills 01-06 does not exist.
+    zone: typed
+    rule: >
+      The system describing itself. Nothing here is personal content —
+      it is the taxonomy, the schema, the saved views and the audit trail.
+    categories:
+      - id: index
+        jd: "01"
+        name: Index
+        types: []
+        rule: >
+          This file, types.yaml, and any generated index. The answer to
+          "what does 32.01 mean" lives here.
+
+      - id: schema
+        jd: "02"
+        name: Schema
+        types: []
+        rule: >
+          Type definitions, field vocabularies, validation rules. The
+          companion half of this file.
+
+      - id: views
+        jd: "03"
+        name: Views
+        types: [view]
+        rule: >
+          Saved queries. Because grouping is fields rather than folders,
+          views are how the typed zone is actually browsed.
+
+      - id: record-templates
+        jd: "04"
+        name: Record Templates
+        types: [template]
+        rule: >
+          Skeletons the app stamps when creating a record. Not to be
+          confused with 44 Document Templates, which are documents you
+          fill in and send.
+
+      - id: logs-reports
+        jd: "05"
+        name: Logs & Audits
+        types: [audit]
+        rule: >
+          Validation runs, import logs, integrity checks. Machine-written,
+          disposable, never hand-edited. Named "Audits" rather than "Reports"
+          because `report` became a doc_type for authored work reports, and
+          one routing key cannot address two categories.
+
+          Note the id stayed `logs-reports` while the display name changed —
+          which is exactly what slug keys are for.
+
+      - id: inbox
+        jd: "06"
+        name: Inbox
+        types: ["*"]
+        rule: >
+          Unfiled. Anything may land here; nothing may stay. A file in the
+          inbox has no id and no type yet — classification is what gives
+          it both.
+    reserved:
+      range: "07-09"
+      claim_rule: >
+        A new system concern that is neither taxonomy, view, template nor
+        log. Set a high bar — this area should stay small.
+
+  # ===========================================================================
+  - id: projects
+    jd: "10-19"
+    letter: P
+    name: Projects
+    provenance: confirmed
+    provenance_note: >
+      4 real projects live here; the three-category scope split held.
+    zone: typed
+    para: project
+    rule: >
+      Short-term efforts with a deadline and a definition of done. When a
+      project ends it moves to 91 — it does not linger here as a
+      dormant folder.
+    categories:
+      - id: work-projects
+        jd: "11"
+        name: Work Projects
+        types: [project]
+        serves: [career]
+        rule: >
+          Projects with an employer or client attached. Scope is a stable,
+          single-valued property of a project, which is why it earns a
+          category split rather than a field.
+
+      - id: personal-projects
+        jd: "12"
+        name: Personal Projects
+        types: [project]
+        rule: >
+          Self-directed projects with an end state — a renovation, a trip,
+          a filing deadline, a course to finish.
+
+      - id: creative-projects
+        jd: "13"
+        name: Creative Projects
+        types: [project, world]
+        related: [drafts-writing, graphics]
+        rule: >
+          Making something: writing, worldbuilding, design, music.
+          Separated from 12 because the working material differs in kind
+          and volume, not because the effort differs.
+
+          Also holds `world` containers. A world is not a project — it has
+          no deadline and never finishes — but it lives here because that is
+          where the real one already lives, and because a setting and the
+          writing it feeds are the same drawer in practice. Its entries sit
+          inside its folder, not in a category of their own.
+    reserved:
+      range: "14-19"
+      claim_rule: >
+        A fourth project scope that is genuinely not work, personal or
+        creative. Prefer a field on `project` over a new category.
+
+  # ===========================================================================
+  - id: areas-of-responsibility
+    jd: "20-29"
+    letter: A
+    name: Areas
+    provenance: provisional
+    provenance_note: >
+      Zero real areas. The most speculative area in the tree.
+    zone: typed
+    para: area
+    rule: >
+      Ongoing responsibilities with a standard to maintain and no end date.
+      An area is never "done" — if it can be finished, it is a project.
+      Areas own no documents; they are pointed AT by documents in 30-39.
+    categories:
+      - id: self
+        jd: "21"
+        name: Self
+        types: [area]
+        related: [insurance-medical]
+        rule: Health, fitness, habits, personal development.
+
+      - id: money
+        jd: "22"
+        name: Money
+        types: [area]
+        related: [income-employment, tax-statements]
+        rule: Budgeting, saving, investing, debt. The standard is solvency.
+
+      - id: career
+        jd: "23"
+        name: Career
+        types: [area]
+        related: [career-materials, work-projects]
+        rule: Employment, professional development, network cultivation.
+
+      - id: home-property
+        jd: "24"
+        name: Home & Property
+        types: [area]
+        related: [property-vehicle]
+        rule: Dwelling, land, maintenance, utilities, improvement.
+
+      - id: vehicles
+        jd: "25"
+        name: Vehicles
+        types: [area]
+        related: [property-vehicle]
+        rule: Ownership, servicing, registration, insurance of vehicles.
+
+      - id: household-family
+        jd: "26"
+        name: Household & Family
+        types: [area]
+        related: [people]
+        rule: >
+          Dependants, pets, shared logistics, family obligations. The
+          responsibilities that come with other people.
+
+      - id: legal-civic
+        jd: "27"
+        name: Legal & Civic
+        types: [area]
+        related: [legal-correspondence]
+        rule: >
+          Active legal matters, civic duties, licences and permits that
+          need maintaining rather than merely storing.
+    reserved:
+      range: "28-29"
+      claim_rule: >
+        A responsibility that recurs indefinitely and does not fit an
+        existing area. Two slots deliberately left — areas accrete slowly
+        and this range should still have room in ten years.
+
+  # ===========================================================================
+  - id: documents
+    jd: "30-39"
+    letter: D
+    name: Documents
+    provenance: derived
+    provenance_note: >
+      114 binaries forced category 39 into existence, claiming the last reserved slot.
+    zone: typed
+    rule: >
+      Records ABOUT you — dated, issued, signed, superseded. They have
+      parties, revisions and retention rules, which is what separates them
+      from reference material in 40-49. A document is filed by what it IS,
+      and points at the area it serves via `serves`.
+    categories:
+      - id: identity-vital
+        jd: "31"
+        name: Identity & Vital Records
+        types: [identity-document, vital-record]
+        serves: [self, household-family]
+        sensitive: true
+        index: metadata-only
+        rule: >
+          Birth and marriage certificates, passports, national ID, social
+          security, citizenship, recovery kits. Irreplaceable or
+          identity-conferring.
+
+      - id: income-employment
+        jd: "32"
+        name: Income & Employment
+        types: [paystub, w2, offer-letter, employment-contract]
+        serves: [money, career]
+        rule: >
+          Money received and the terms it was received under. Tax RETURNS
+          file under 33; résumés under 37.
+
+      - id: tax-statements
+        jd: "33"
+        name: Tax & Statements
+        types: [tax-return, bank-statement, brokerage-statement, invoice]
+        serves: [money]
+        rule: >
+          Filed returns and periodic financial statements. Anything with a
+          statement period and a closing balance.
+
+      - id: insurance-medical
+        jd: "34"
+        name: Insurance & Medical
+        types: [insurance-policy, claim, medical-record]
+        serves: [self, vehicles, home-property]
+        sensitive: true
+        index: metadata-only
+        rule: >
+          Policies, claims, explanations of benefit, clinical records.
+          Covers every insurance line — health, auto, home, life — because
+          the document shape is identical across them.
+
+      - id: property-vehicle
+        jd: "35"
+        name: Property & Vehicle
+        types: [deed, lease, title, registration, service-record]
+        serves: [home-property, vehicles]
+        rule: >
+          Proof of ownership or tenancy, and the maintenance history that
+          attaches to it.
+
+      - id: legal-correspondence
+        jd: "36"
+        name: Legal & Correspondence
+        types: [filing, correspondence, contract]
+        serves: [legal-civic]
+        sensitive: true
+        index: metadata-only
+        rule: >
+          Court filings, formal letters, executed agreements. Anything
+          where the exact wording and the date received may matter later.
+
+      - id: career-materials
+        jd: "37"
+        name: Career Materials
+        types: [resume, cover-letter, portfolio, performance-review, certificate]
+        serves: [career]
+        rule: >
+          Documents you produce about yourself for professional purposes.
+          Tailored variants are records with a `target` field, not
+          subfolders.
+
+      - id: purchases-warranties
+        jd: "38"
+        name: Purchases, Warranties & Licenses
+        types: [quote, receipt, warranty, manual, software-license]
+        serves: [money, home-property]
+        related: [applications]
+        rule: >
+          Proof of purchase and what it entitles you to, plus the quotes that
+          preceded it. Software licence keys live here as records; the
+          installers themselves live in 81.
+
+      - id: work-products
+        jd: "39"
+        name: Work Products
+        types: [analysis, dataset, report, register]
+        related: [work-projects]
+        rule: >
+          Documents you PRODUCED rather than received — analyses, exports,
+          reports, registers. Most carry `attaches_to` and live inside their
+          project's folder; this category is the home for the unattached
+          ones. A survey of 114 real binaries found 35 spreadsheets that no
+          other category could hold, which is what claimed this slot.
+    full: >
+      31-39 are all allocated. A tenth document domain needs a merge rather
+      than a number — which is the intended pressure, since `doc_type` should
+      absorb new kinds long before a new category does.
+
+  # ===========================================================================
+  - id: resources
+    jd: "40-49"
+    letter: R
+    name: Resources
+    provenance: derived
+    provenance_note: >
+      29 real resources; 5 of them forced a new `plan` subtype.
+    zone: typed
+    para: resource
+    rule: >
+      Reference material — things you consult, not things that happened to
+      you. Nothing here is dated evidence; nothing here is irreplaceable.
+      If it has a party and a signature it belongs in 30-39.
+    categories:
+      - id: technical-reference
+        jd: "41"
+        name: Technical Reference
+        types: [reference, spec, cheat-sheet]
+        rule: API specs, protocol docs, cheat sheets, architecture notes.
+
+      - id: design-assets
+        jd: "42"
+        name: Design Assets
+        types: [asset, brand-book, ui-kit]
+        related: [graphics]
+        rule: >
+          Reusable design material — UI kits, brand books, fonts, icon
+          sets. Source assets for making things, as opposed to finished
+          output in 74.
+
+      - id: learning
+        jd: "43"
+        name: Learning
+        types: [course-note, textbook, tutorial]
+        related: [reading-notes]
+        rule: >
+          Instructional material as acquired. Your own notes ON it belong
+          in 65 — the distinction is authorship.
+
+      - id: document-templates
+        jd: "44"
+        name: Document Templates
+        types: [document-template]
+        rule: >
+          Blank documents intended to be filled in and sent — NDAs,
+          service agreements, letter formats. Distinct from 04, which
+          templates records inside the app.
+
+      - id: guides-runbooks
+        jd: "45"
+        name: Guides & Runbooks
+        types: [guide, runbook, plan]
+        rule: >
+          Procedures written to be followed later, usually by you — the
+          "how I did this last time" archive, plus plans, which are the same
+          thing pointed forwards at work not yet done.
+
+      - id: research-clippings
+        jd: "46"
+        name: Research & Clippings
+        types: [article, paper, clipping]
+        rule: >
+          Captured external material — saved articles, papers, threads.
+          High-volume and low-ceremony by design.
+    reserved:
+      range: "47-49"
+      claim_rule: >
+        A reference domain distinct enough that mixing it into 41-46 would
+        make those categories incoherent.
+
+  # ===========================================================================
+  - id: contacts
+    jd: "50-59"
+    letter: C
+    name: Contacts
+    provenance: confirmed
+    provenance_note: >
+      15 real people. Categories 52 and 53 hold nothing yet.
+    zone: typed
+    rule: >
+      Who, not what. Deliberately cross-cutting — a person is not filed
+      under work or personal, because one person is frequently both. That
+      distinction is a `relationship` field on the record, which is
+      multi-valued, so it can never become a folder.
+    categories:
+      - id: people
+        jd: "51"
+        name: People
+        types: [person]
+        rule: >
+          One record per human. `relationship` (family / friend /
+          colleague / client / vendor / acquaintance) is a multi-valued
+          field — this is the case that rule `stable-single-valued-
+          partitions` exists for.
+
+      - id: organizations
+        jd: "52"
+        name: Organizations
+        types: [organization]
+        related: [work-projects, income-employment]
+        rule: >
+          Companies, institutions, vendors, practices. People link to
+          organisations; documents link to both.
+
+      - id: groups
+        jd: "53"
+        name: Groups
+        types: [group]
+        rule: >
+          Named collections of people that persist — teams, households,
+          clubs, committees. A group is a record with members, not a
+          folder of person files.
+    reserved:
+      range: "54-59"
+      claim_rule: >
+        Deliberately generous. Contacts is one type today; this headroom
+        exists so it can grow without renumbering anything.
+
+  # ===========================================================================
+  - id: notes
+    jd: "60-69"
+    letter: N
+    name: Notes, Journal & Tasks
+    provenance: derived
+    provenance_note: >
+      38 real records; 61 was rewritten to accept daily and weekly as one type.
+    zone: typed
+    rule: >
+      What you wrote. The highest-volume, lowest-ceremony part of the
+      typed zone — creation must never require a filing decision, so
+      every category here has an unambiguous default destination.
+    categories:
+      - id: journal
+        jd: "61"
+        name: Journal
+        types: [daily, weekly]
+        rule: >
+          Dated entries. The date IS the identity — no title required, no
+          filing decision at capture time. Daily and weekly are one type
+          (`journal`) with two periods, sharing a category because they share
+          a browsing habit: you look for "that week" and "that day" in the
+          same place.
+
+      - id: meetings
+        jd: "62"
+        name: Meetings
+        types: [meeting]
+        related: [people, organizations]
+        rule: >
+          Notes from a conversation with other people. Attendees are a
+          link field to 51, so a person's history assembles itself.
+
+      - id: atomic-notes
+        jd: "63"
+        name: Notes
+        types: [note]
+        rule: >
+          One idea per note, durable, linked. The default destination for
+          anything written that is not dated, not a meeting and not a task.
+
+      - id: tasks
+        jd: "64"
+        name: Tasks
+        types: [task]
+        related: [work-projects, personal-projects, creative-projects]
+        rule: >
+          One record per task. Central rather than filed under a project,
+          because a task links to its project — location would only
+          duplicate what the link already says, and tasks routinely
+          serve more than one.
+
+      - id: reading-notes
+        jd: "65"
+        name: Reading Notes
+        types: [literature-note]
+        related: [learning, research-clippings]
+        rule: >
+          Your notes on someone else's work, with a `source` link back to
+          the material in 43 or 46. Authorship is the line: theirs there,
+          yours here.
+
+      - id: drafts-writing
+        jd: "66"
+        name: Drafts & Writing
+        types: [draft]
+        related: [creative-projects]
+        rule: >
+          Prose in progress. Finished pieces attached to a creative
+          project live with that project in 13.
+    reserved:
+      range: "67-69"
+      claim_rule: >
+        A new note genre with a distinct capture flow. If it can be a
+        field on `note`, make it a field.
+
+  # ===========================================================================
+  - id: media
+    jd: "70-79"
+    letter: M
+    name: Media
+    provenance: provisional
+    provenance_note: >
+      No media library exists anywhere in the surveyed material.
+    zone: bulk
+    rule: >
+      Libraries of captured or produced media. Bulk zone: these files
+      carry no fields worth validating, so named subfolders are allowed
+      and expected. The app indexes paths, filenames and embedded
+      metadata (EXIF, ID3) without imposing a schema.
+    categories:
+      - id: photos
+        jd: "71"
+        name: Photos
+        subfolders: named
+        example_subfolders: [travel, events, family, screengrabs]
+        rule: Photographic captures. Organise by occasion, not by subject.
+
+      - id: video
+        jd: "72"
+        name: Video
+        subfolders: named
+        rule: Recorded footage, edited output, and their project files.
+
+      - id: audio-music
+        jd: "73"
+        name: Audio & Music
+        subfolders: named
+        rule: Music library, recordings, voice memos, podcasts kept.
+
+      - id: graphics
+        jd: "74"
+        name: Graphics
+        subfolders: named
+        related: [design-assets, creative-projects]
+        rule: >
+          Illustration and design OUTPUT. Reusable input assets belong in
+          42 — the split is produced-here versus acquired-elsewhere.
+
+      - id: screenshots
+        jd: "75"
+        name: Screenshots
+        subfolders: named
+        rule: >
+          Screen captures and screencasts. High-churn and mostly
+          disposable; given its own category so it never pollutes 71.
+    reserved:
+      range: "76-79"
+      claim_rule: A media modality not covered by 71-75.
+
+  # ===========================================================================
+  - id: tools
+    jd: "80-89"
+    letter: T
+    name: Tools & Software
+    provenance: provisional
+    provenance_note: >
+      No installers, disk images or backup sets exist in the surveyed material.
+    zone: bulk
+    rule: >
+      Machine artifacts — things that run, install or restore. Nothing
+      here is about you; it is about the computers. Backups live here
+      rather than in an area of their own, since a backup set is the same
+      kind of object as a disk image.
+    categories:
+      - id: applications
+        jd: "81"
+        name: Applications
+        subfolders: named
+        related: [purchases-warranties]
+        rule: >
+          Installers and portable applications. Licence keys are records
+          in 38 — the installer is bulk, the entitlement is typed.
+
+      - id: dev-environments
+        jd: "82"
+        name: Dev Environments
+        subfolders: named
+        rule: SDKs, toolchains, container images, language runtimes.
+
+      - id: os-images
+        jd: "83"
+        name: OS Images & ISOs
+        subfolders: named
+        rule: Bootable media, virtual machine images, recovery images.
+
+      - id: scripts-utilities
+        jd: "84"
+        name: Scripts & Utilities
+        subfolders: named
+        rule: >
+          Small tools you wrote or collected. A script that IS a project
+          belongs in 11-13; this is for the loose ones.
+
+      - id: device-backups
+        jd: "85"
+        name: Device Backups
+        subfolders: named
+        rule: >
+          Phone, tablet and laptop backups. Retention is a policy on the
+          folder, not a field on a record.
+
+      - id: system-backups
+        jd: "86"
+        name: System Backups
+        subfolders: named
+        rule: >
+          Full-system and server images. Note that these live INSIDE the
+          tree they back up — offsite copies are the actual safety net,
+          and this category is a staging area, not the last line.
+    reserved:
+      range: "87-89"
+      claim_rule: A machine-artifact class not covered by 81-86.
+
+  # ===========================================================================
+  - id: archives
+    jd: "90-99"
+    letter: X
+    name: Archives
+    provenance: provisional
+    provenance_note: >
+      Nothing has ever been archived. The 9N mirror rule is entirely untested.
+    zone: mixed
+    para: archive
+    rule: >
+      Cold storage for both zones. Category `9N` receives area `N0-N9`,
+      so the destination is computable and never needs looking up.
+      Archived folders keep their `id` and their original `jd` — the
+      number is recorded in `archived_from`, so provenance survives and
+      the vacated number still goes to `tombstones` rather than being
+      reissued.
+    categories:
+      - id: archived-projects
+        jd: "91"
+        mirrors: projects
+        name: Archived Projects
+        rule: >
+          Completed, cancelled and abandoned projects. The largest and
+          most active archive category by a wide margin.
+
+      - id: archived-areas
+        jd: "92"
+        mirrors: areas-of-responsibility
+        name: Archived Areas
+        rule: >
+          Responsibilities that ended — a sold property, a former
+          dependant, a closed legal matter.
+
+      - id: archived-documents
+        jd: "93"
+        mirrors: documents
+        name: Archived Documents
+        inherits_sensitivity: true
+        rule: >
+          Superseded and expired records. Sensitivity is inherited from
+          the source category — an expired passport is still a passport.
+
+      - id: archived-resources
+        jd: "94"
+        mirrors: resources
+        name: Archived Resources
+        rule: Reference material for tools, formats or roles you have left behind.
+
+      - id: archived-contacts
+        jd: "95"
+        mirrors: contacts
+        name: Archived Contacts
+        rule: >
+          Former colleagues, defunct organisations, dissolved groups.
+          Archived rather than deleted, because old documents still link
+          to them.
+
+      - id: archived-notes
+        jd: "96"
+        mirrors: notes
+        name: Archived Notes & Journal
+        rule: >
+          Closed journal years and notes on subjects gone cold. Journal
+          entries archive by year, never individually.
+
+      - id: archived-media
+        jd: "97"
+        mirrors: media
+        name: Archived Media
+        rule: Libraries moved out of the working set, usually for size.
+
+      - id: archived-tools
+        jd: "98"
+        mirrors: tools
+        name: Archived Tools
+        rule: >
+          Software for hardware you no longer own, and backups past their
+          working retention but not yet destroyed.
+
+      - id: cold-storage
+        jd: "99"
+        mirrors: null
+        name: Cold Storage
+        rule: >
+          Undifferentiated legacy — imported trees not yet classified, and
+          material kept without a decision having been made about it.
+          The one place in the system where "I'll sort this later" is
+          allowed to be true. Everything here is a debt.
+
+# -----------------------------------------------------------------------------
+#  TOMBSTONES — retired ids and numbers, never reissued
+# -----------------------------------------------------------------------------
+#  Populated on every rename, merge or retirement. An entry here is why a
+#  stale reference resolves to an explanation instead of to the wrong thing.
+#
+#  - id: <retired slug>
+#    jd: "<vacated number>"
+#    retired: YYYY-MM-DD
+#    reason: >
+#      What happened to it.
+#    superseded_by: <id or null>
+
+tombstones: []
+
+# -----------------------------------------------------------------------------
+#  EXCLUDED — present on disk, outside the taxonomy
+# -----------------------------------------------------------------------------
+
+excluded:
+  - path: ".git/"
+    reason: Version control internals.
+  - path: "**/node_modules/"
+    reason: Dependency trees. Enormous, disposable, regenerable.
+  - path: "**/.DS_Store"
+    reason: Filesystem noise.
+  - path: "**/Thumbs.db"
+    reason: Filesystem noise.
+  - path: "$RECYCLE.BIN/"
+    reason: OS recycle bin.
+  - path: "System Volume Information/"
+    reason: OS internals.
