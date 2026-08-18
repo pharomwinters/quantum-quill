@@ -1,7 +1,9 @@
 # Application Design
 
 **Date:** 2026-08-17
-**Status:** approved, not yet implemented
+**Status:** SUPERSEDED by [2026-08-18-service-design.md](2026-08-18-service-design.md).
+The editor-extension architecture was replaced by an always-on service. Kept
+for the reasoning it records — the schema and `core` decisions still hold.
 
 Companion to [`types.yaml`](../../types.yaml) and
 [`Folder-layout.yaml`](../../Folder-layout.yaml). Those define the schema; this
