@@ -52,8 +52,9 @@ validation rules from *detection* into *prevention* — `duplicate-id` becomes a
 primary key, `unresolvable-link` a foreign key — and dissolves four more
 outright.
 
-| Design | Status |
+| Document | Status |
 |---|---|
+| [2026-08-19 — Phase 1 implementation plan](docs/design/2026-08-19-phase-1-implementation-plan.md) | proposed |
 | [2026-08-18 — Service design](docs/design/2026-08-18-service-design.md) | current |
 | [2026-08-17 — Application design](docs/design/2026-08-17-application-design.md) | superseded |
 
