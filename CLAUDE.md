@@ -2,16 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Orient yourself first: there is no code here
+## Orient yourself first: the schema is the product, the code serves it
 
-This repository is a **specification**, not an application. Seven files: two
-schema YAMLs, two design documents, a PowerShell scaffolder, a README and this
-file. No `package.json`, no source tree, no tests, no build.
-
-That is the current, intended state — not an incomplete checkout. Two
+This repository is a **specification** with the beginning of a service built to
+it. The schema — `types.yaml` and `Folder-layout.yaml` — is the artifact; two
 implementations have already been written and discarded (see **Discarded
-architectures**), and both were discarded before the schema moved. Do not go
-looking for an implementation, and do not assume one is missing.
+architectures**) and neither moved it.
+
+Phase 1 is under way. What exists in `packages/` today is `schema`: the two
+YAML files loaded and derived into a model, plus the meta-tests that hold the
+files to their own contracts. There is still no database, no HTTP surface and
+no records — see **Next step** for what lands next, and do not assume anything
+beyond `packages/schema` is missing rather than unbuilt.
 
 ## The method, which governs how you should change things
 
@@ -100,20 +102,25 @@ filing time and makes the obvious query unanswerable.
 
 ## Commands
 
-There is no build or test tooling yet. What exists:
+Node 22.6+ is required: tests run TypeScript directly through Node's type
+stripping, so there is no build step and no test framework. Both are
+deliberate — a compile step between the schema and the tests that check it is
+one more place for the two to disagree.
+
+```bash
+npm install
+npm test          # every packages/*/test/**/*.test.ts
+npm run typecheck # tsc --noEmit
+```
 
 ```powershell
 # Build the folder tree from the layout file (idempotent; -WhatIf to preview)
 .\New-VaultTree.ps1 -LayoutFile .\Folder-layout.yaml -Root D:\vault -WhatIf
 ```
 
-```bash
-# Sanity-check both schema files parse
-python -c "import yaml; yaml.safe_load(open('types.yaml',encoding='utf-8')); yaml.safe_load(open('Folder-layout.yaml',encoding='utf-8')); print('ok')"
-```
-
-Phase 1 (below) introduces the real toolchain: npm workspaces, numbered `.sql`
-migrations, and the DDL cross-check test.
+**Adding a test that cannot fail is worse than adding none.** Every check in
+this repository exists to catch drift between two independently derived things,
+so break the schema on purpose and watch the test go red before trusting it.
 
 ## Current architecture (designed, not built)
 
@@ -155,7 +162,12 @@ test). It found nine schema defects before being retired — that work is why th
 ## Next step
 
 **Phase 1: the compose stack, numbered SQL migrations, and the DDL cross-check
-test.**
+test.** Planned in detail in
+[`docs/design/2026-08-19-phase-1-implementation-plan.md`](docs/design/2026-08-19-phase-1-implementation-plan.md),
+which carries the work plan, the DDL decisions and their rationale. Steps 1-3
+of that plan are done: the schema questions the DDL forced open are settled in
+`types.yaml`, and `packages/schema` with its meta-tests exists. The migration
+runner and the DDL are next.
 
 The cross-check is the load-bearing piece. It asserts the live Postgres schema
 and `types.yaml` agree in both directions — a column with no field fails, a

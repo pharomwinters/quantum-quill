@@ -12,7 +12,7 @@ taxonomy shaped by whatever the tools happened to do.
 | File | Answers |
 |---|---|
 | [`Folder-layout.yaml`](Folder-layout.yaml) | Where a record lives — Johnny Decimal areas, PARA inside the typed zone, routing, filing rules |
-| [`types.yaml`](types.yaml) | What a record is — 14 core types, 130 vocabulary values, lifecycle, the query contract, validation rules |
+| [`types.yaml`](types.yaml) | What a record is — 14 core types, 135 vocabulary values, lifecycle, the query contract, validation rules |
 
 Folders and records are identified by permanent kebab-case slugs. Johnny Decimal
 numbers are *addresses*, not keys, so renumbering, moving and archiving never

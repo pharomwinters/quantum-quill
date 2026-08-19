@@ -1,7 +1,7 @@
 # Phase 1 — Implementation Plan
 
 **Date:** 2026-08-19
-**Status:** proposed · §3 settled 2026-08-19
+**Status:** in progress · steps 1-3 done 2026-08-19
 **Implements:** [2026-08-18-service-design.md](2026-08-18-service-design.md) §8, phase 1
 
 Phase 1 is: **compose stack, numbered SQL migrations, DDL cross-check test
@@ -174,6 +174,13 @@ phase 3, apart from the optional health endpoint in §11.
 framework dependency), Kysely for phase 2 onward, `pg` as the driver. No ORM,
 no migration library — the DDL is hand-written by decision, and a library that
 generates or reverses it would take that back.
+
+Tests run TypeScript through **Node's own type stripping**
+(`--experimental-strip-types`), so there is no build step and no transpiler:
+`tsc` only ever typechecks. A compile step between the schema and the tests
+that check it is one more place for the two to disagree. The cost is that
+source must be erasable-syntax-only — no TS enums, no parameter properties —
+which `erasableSyntaxOnly` enforces at typecheck time.
 
 ---
 
@@ -450,8 +457,8 @@ Each step ends with something you can run.
 
 | # | Step | Done when |
 |---|---|---|
-| 1 | Workspace skeleton: root `package.json`, `tsconfig.base.json`, `node:test` wiring | `npm test` runs and reports zero failures |
-| 2 | `packages/schema`: loaders, derived model, the two meta-tests | Both meta-tests pass against the YAML as it stands today |
+| 1 | ~~Workspace skeleton: root `package.json`, `tsconfig.base.json`, `node:test` wiring~~ | **Done, 2026-08-19.** Node 22 type stripping, so no build step and no test framework |
+| 2 | ~~`packages/schema`: loaders, derived model, the two meta-tests~~ | **Done, 2026-08-19.** 10 tests green, and each verified to go red on a deliberate break |
 | 3 | ~~**Settle §3** — the `body`, `folder` and `date` questions, as edits to `types.yaml`~~ | **Done, 2026-08-19.** The YAML says what the DDL is about to assume |
 | 4 | Compose stack: `postgres` + `migrate` | `docker compose up -d` reaches healthy; `db:status` connects |
 | 5 | Migration runner | Applies from scratch; re-run is a no-op; editing an applied file fails loudly |

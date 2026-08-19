@@ -9,11 +9,12 @@
 #  body is commentary and `file:` points at the payload beside it.
 #
 #  Every record carries a permanent `id` slug. Links point at ids, so renaming,
-#  retitling, moving and archiving never break a reference. A SQLite index may
-#  be built over all of this for query speed — derived, disposable, and never
-#  the source of truth.
+#  retitling, moving and archiving never break a reference. Postgres holds the
+#  records and a projector renders them back out as markdown — see
+#  docs/design — but this file is the specification both are built to and is
+#  owned by neither.
 #
-#  58 type names in the layout collapse here to 12 core types and 50 subtype
+#  67 type names in the layout collapse here to 14 core types and 82 subtype
 #  values. Adding a new kind of document is a vocabulary edit, not a schema
 #  change.
 #
