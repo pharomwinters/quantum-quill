@@ -14,7 +14,7 @@
     "test": "node --disable-warning=ExperimentalWarning --experimental-strip-types --test \"packages/*/test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "db": "node --disable-warning=ExperimentalWarning --experimental-strip-types packages/db/src/cli.ts",
-    "db:types": "kysely-codegen --dialect postgres --out-file packages/db/src/schema.d.ts"
+    "db:types": "kysely-codegen --dialect postgres --url \"env(DATABASE_URL)\" --out-file packages/db/src/schema.d.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

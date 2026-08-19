@@ -286,11 +286,11 @@ test('A10: every field the query contract guarantees is indexed, is indexed', ()
   for (const index of model.types.query.indexes) {
     if (index.class !== 'exact' && index.class !== 'range') continue;
     for (const field of Array.isArray(index.fields) ? index.fields : []) byName.add(field);
-    // The `subtypes:` list names VOCABULARIES, not field names. The two are not
-    // interchangeable: `period` is both the journal subtype vocabulary and a
-    // plain text field on a performance-review document, and only the first is
-    // guaranteed queryable.
-    for (const vocabulary of index.subtypes ?? []) byVocabulary.add(vocabulary);
+    // `subtype_vocabularies:` names VOCABULARIES, not field names — the key is
+    // spelled that way because the two are not interchangeable. `period` is
+    // both the journal subtype vocabulary and a plain text field on a
+    // performance-review document, and only the first is guaranteed queryable.
+    for (const vocabulary of index.subtype_vocabularies ?? []) byVocabulary.add(vocabulary);
   }
   // `folder` is derived and has no column yet — open_questions.folder-storage.
   byName.delete('folder');
@@ -327,6 +327,50 @@ test('A10: the full-text and tag indexes the text class promises exist', () => {
     onRecord.some((i) => i.columns.includes('tags')),
     'no index over tags',
   );
+});
+
+// A11 -----------------------------------------------------------------------
+test('A11: declared uniqueness is enforced, and nothing else is', () => {
+  const structural = (columns: string[]): boolean =>
+    columns.every((c) => c === 'id' || c === 'type');
+
+  const problems: string[] = [];
+  for (const table of model.tables.values()) {
+    const declared = model.uniqueKeys
+      .filter((k) => k.table === table.name)
+      .map((k) => [...k.columns].sort().join(', '))
+      .sort();
+
+    // Primary keys and the record(id, type) handle are structural, not schema
+    // claims, so they are excluded by rule rather than by exemption.
+    const enforced = live.indexes
+      .filter((i) => i.table === table.name && i.definition.includes('CREATE UNIQUE INDEX'))
+      .map((i) => [...i.columns].sort())
+      .filter((columns) => !structural(columns))
+      .map((columns) => columns.join(', '))
+      .sort();
+
+    if (JSON.stringify(declared) !== JSON.stringify(enforced)) {
+      problems.push(
+        `${table.name}: declares unique [${declared.join(' | ')}], enforces [${enforced.join(' | ')}]`,
+      );
+    }
+  }
+  assert.deepEqual(problems, []);
+});
+
+test('A11: a field with a declared default has one in the database', () => {
+  const problems: string[] = [];
+  for (const table of model.tables.values()) {
+    for (const column of table.columns) {
+      if (column.default === undefined) continue;
+      const actual = live.columns.find((c) => c.table === table.name && c.name === column.name);
+      if (actual?.default == null) {
+        problems.push(`${table.name}.${column.name} is declared with a default and has none`);
+      }
+    }
+  }
+  assert.deepEqual(problems, []);
 });
 
 // The register ---------------------------------------------------------------

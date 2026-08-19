@@ -551,3 +551,41 @@ means the same thing as one of the other two is worth nothing. The schema has
 no way to say "defaulted, never null" — which would be a new field attribute
 (`default:`), and inventing schema vocabulary is exactly what the method
 forbids doing on a hunch. Left as it stands, flagged rather than guessed at.
+
+### What CI found that local testing could not
+
+The first CI run failed one test of 58: `a record that something links to
+cannot be deleted` expected SQLSTATE `23503` and got `23001`.
+
+**Postgres 18 reports an `ON DELETE RESTRICT` refusal as `restrict_violation`
+(23001); 17 and earlier report `foreign_key_violation` (23503).** The DDL was
+right and the database was doing its job — the test was asserting a Postgres
+version. It now asserts class 23 and the constraint name, which is what the
+rule is actually about.
+
+The real defect was upstream of the test: **everything was verified against
+PostgreSQL 16, while compose and CI pin 18.** Pinning by digest was supposed to
+stop exactly this, and then the verification happened somewhere else. Postgres
+18 is not installable in the environment this was built in, so until that
+changes, CI is the authority for anything version-sensitive and local green is
+a weaker claim than it looks.
+
+Chasing it surfaced a quieter bug. Adding A11 made the index assertions fail
+with nonsense — `enforces [,, d, e, i, p, t, y, {, }]` — because `attname` is
+of SQL type `name`, `array_agg` over it produces `name[]`, and node-postgres
+does not parse `name[]`: it hands back the raw `"{id}"` string. A10 had been
+calling `.includes()` on that string, so it was substring-matching rather than
+testing membership, and would have accepted an index on `doc_date` as
+satisfying a guarantee about `date`. Fixed by casting to `text`.
+
+### The three findings, resolved
+
+| Finding | Resolution |
+|---|---|
+| `body` and `tags` want to be nullable in the schema and never-null in storage | New field attribute **`default:`**. It says what `required` could not: the author is never asked, and a record never lacks one. `0007` restores `NOT NULL`, and A11 asserts a declared default is a real one |
+| `journal.date` was `unique: true`, forbidding a Monday daily beside a weekly anchored on that Monday | New field attribute **`unique_with: [period]`**, and migration `0006`. A11 now asserts declared uniqueness is enforced and nothing else is — so this can no longer drift either way |
+| `query.indexes.subtypes` reads as field names but means vocabularies | Renamed to **`subtype_vocabularies:`**. The values never changed; the key now says what the list is, and the cross-check special case became a stated rule |
+
+Two of the three closed by adding a field attribute rather than by bending the
+DDL. That is the arrangement working: the schema gained the vocabulary to say
+something true that it previously could not say, and the SQL followed.

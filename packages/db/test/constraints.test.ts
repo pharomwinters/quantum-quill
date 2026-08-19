@@ -197,13 +197,22 @@ test('a record that something links to cannot be deleted', async () => {
   await db.query('BEGIN');
   await db.query(`INSERT INTO link VALUES ('a-deed', 'document', 'attaches_to', 'paint-line', 'project')`);
   let code = '';
+  let message = '';
   try {
     await db.query(`DELETE FROM record WHERE id = 'paint-line'`);
   } catch (error) {
-    code = (error as { code: string }).code;
+    const e = error as { code: string; message: string };
+    code = e.code;
+    message = e.message;
   }
   await db.query('ROLLBACK');
-  assert.equal(code, '23503');
+  // Postgres 18 reports an ON DELETE RESTRICT refusal as restrict_violation
+  // (23001); 17 and earlier report foreign_key_violation (23503). Both are
+  // class 23 — integrity constraint violation — and both name the constraint,
+  // which is what the rule is about. Asserting the exact code would be
+  // asserting a Postgres version.
+  assert.match(code, /^23/, `expected an integrity violation, got ${code || 'no error'}`);
+  assert.match(message, /link_target_target_type_fkey/);
 });
 
 test('a subtype row cannot attach to a record of another type', async () => {

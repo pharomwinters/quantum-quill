@@ -15,6 +15,8 @@ export type LiveColumn = {
   generated: boolean;
   /** For generated columns: the expression, e.g. `'core_type'::text`. */
   generationExpression: string | null;
+  /** For ordinary columns: the DEFAULT expression, if any. */
+  default: string | null;
 };
 
 export type LiveCheck = { table: string; name: string; definition: string };
@@ -90,7 +92,11 @@ export async function introspect(client: Client): Promise<LiveSchema> {
   }>(
     `SELECT c.relname AS table, i.relname AS name,
             pg_get_indexdef(x.indexrelid) AS definition,
-            array_remove(array_agg(a.attname ORDER BY a.attnum), NULL) AS columns
+            -- ::text matters: attname is of SQL type "name", and node-postgres
+            -- does not parse name[] into an array — it hands back the raw
+            -- "{a,b}" string, which silently turns membership tests into
+            -- substring matches.
+            array_remove(array_agg(a.attname::text ORDER BY a.attnum), NULL) AS columns
        FROM pg_index x
        JOIN pg_class c     ON c.oid = x.indrelid
        JOIN pg_class i     ON i.oid = x.indexrelid
@@ -122,6 +128,7 @@ export async function introspect(client: Client): Promise<LiveSchema> {
       notNull: r.not_null,
       generated: r.generated,
       generationExpression: r.generated ? r.generation_expression : null,
+      default: r.generated ? null : r.generation_expression,
     })),
     checks: constraints.rows
       .filter((r) => r.kind === 'c')

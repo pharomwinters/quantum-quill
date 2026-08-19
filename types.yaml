@@ -97,6 +97,31 @@ field_types:
     migrating from one representation to another — see `person.organization`.
 
 # -----------------------------------------------------------------------------
+#  FIELD ATTRIBUTES — what may be said about a field, beyond its type
+# -----------------------------------------------------------------------------
+
+field_attributes:
+  required: >
+    The author must supply a value. `on-create` means required when creating a
+    record but only a warning on records that predate the schema.
+  default: >
+    The store materialises this value when the author supplies none, and the
+    field is therefore never absent. Distinct from `required`, which is a
+    demand on the author: `body` is never required and never missing.
+  unique_with: >
+    The field is unique in combination with the fields named. `unique_with: []`
+    means unique on its own.
+  immutable: Never changes after creation. Only `id`.
+  system: Written by the store, never hand-edited.
+  of: The closed vocabulary an `enum` draws from.
+  to: The types a `link` may point at. `"*"` means any core type.
+  inverse: >
+    The name of the reverse edge, which is derived and never written. Must be
+    unique on the TARGET type, not globally.
+  symmetric: The link is its own inverse. Only `related`.
+  derived_from: Where the value comes from when it is not authored.
+
+# -----------------------------------------------------------------------------
 #  UNIVERSAL FIELDS — present on every record of every type
 # -----------------------------------------------------------------------------
 
@@ -127,13 +152,18 @@ universal:
 
   - key: body
     type: longtext
+    default: ""
     description: >
       Everything below the frontmatter — see `conventions.body`. Declared as a
       field because it is one: the query contract full-text indexes it, and a
       store that is not a file has to give it somewhere to live. It was
       omitted only because in a file-based system the body was whatever the
       frontmatter was not, and so needed no declaration. Never parsed for
-      data; an empty body is valid.
+      data; an empty body is valid — which is what `default` says and
+      `required` could not: the author is never asked for a body, and a record
+      never lacks one. An absent body and an empty body are the same thing, and
+      a store with a third state for it would be storing a distinction that
+      does not exist.
 
   - key: created
     type: datetime
@@ -182,9 +212,12 @@ universal:
 
   - key: tags
     type: list[text]
+    default: []
     description: >
       Free-form labels. Deliberately unvalidated: the closed vocabularies
       carry the meaning, and tags carry everything not worth formalising.
+      Defaulted for the same reason as `body`: no tags is an empty list, not a
+      missing one.
 
 # -----------------------------------------------------------------------------
 #  ROUTING — which folder a record belongs in
@@ -531,9 +564,15 @@ types:
       - key: date
         type: date
         required: true
-        unique: true
+        unique_with: [period]
         description: >
           The anchor date. For a weekly, the Monday the week starts on.
+
+          Unique per PERIOD, not outright. A weekly is anchored on the Monday
+          it starts, and that Monday usually also has a daily — so a bare
+          uniqueness constraint on the date would make the two mutually
+          exclusive every week of the year. The date identifies an entry only
+          once you know which kind of entry it is.
 
   # ===========================================================================
   - id: meeting
@@ -1318,8 +1357,17 @@ query:
       fields: [id]
     - class: exact
       fields: [type, folder, status, state, priority, scope]
-      subtypes: [doc_type, resource_type, note_type, period, entry_type, system_type]
-      note: Every closed vocabulary is exact-indexed. That is what closing it buys.
+      subtype_vocabularies: [doc_type, resource_type, note_type, period,
+                             entry_type, system_type]
+      note: >
+        Every closed vocabulary is exact-indexed. That is what closing it buys.
+
+        These name VOCABULARIES, not fields, and the distinction is load-bearing
+        rather than pedantic: field names are not unique across types. `period`
+        is the journal's subtype vocabulary AND a plain text field on a
+        performance-review document, and only the first is guaranteed
+        queryable. Reading this list as field names indexes the wrong column.
+        Renamed from `subtypes` for that reason — the values never changed.
     - class: range
       fields: [created, updated, doc_date, date, due, scheduled, start, end,
                met, coverage_start, coverage_end, expires, valid_until,

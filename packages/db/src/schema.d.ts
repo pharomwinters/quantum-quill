@@ -160,10 +160,10 @@ export interface Record {
   /**
    * Everything below the frontmatter. Never parsed for data; an empty body is valid.
    */
-  body: Generated<string | null>;
+  body: Generated<string>;
   created: Generated<Timestamp>;
   id: string;
-  tags: Generated<string[] | null>;
+  tags: Generated<string[]>;
   title: string | null;
   type: string;
   type_vocab: Generated<string>;

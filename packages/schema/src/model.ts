@@ -46,7 +46,8 @@ export type Column = {
   field: string;
   /** Set when the column is an enum: the vocabulary its FK points at. */
   vocabulary?: string;
-  unique?: boolean;
+  /** The literal the column defaults to, when the field declares one. */
+  default?: unknown;
   /** Set for subtype `adds`: the subtype values that may carry this column. */
   guard?: { field: string; values: string[] };
 };
@@ -60,6 +61,9 @@ export type Junction = {
 };
 
 export type Table = { name: string; type: string; columns: Column[] };
+
+/** A uniqueness constraint the schema declares, over one or more columns. */
+export type UniqueKey = { table: string; columns: string[] };
 
 export type LinkField = {
   sourceType: string;
@@ -83,6 +87,7 @@ export type Model = {
   /** One table per core type, plus `record` for the universal fields. */
   tables: Map<string, Table>;
   junctions: Junction[];
+  uniqueKeys: UniqueKey[];
   linkFields: LinkField[];
   /** Every link field expanded across its declared targets — the `link_field` rows. */
   linkFieldRows: Array<{ sourceType: string; field: string; targetType: string; multi: boolean; inverse: string }>;
@@ -135,7 +140,10 @@ function columnsFor(
     }
 
     const type = f.type as string;
-    const notNull = f.required === true;
+    // A defaulted field is never absent, so its column is NOT NULL. `required`
+    // is a demand on the author and `default` is a promise by the store; a
+    // field may have either, both or neither.
+    const notNull = f.required === true || f.default !== undefined;
     const element = elementOf(type);
 
     if (element === 'enum') {
@@ -155,6 +163,7 @@ function columnsFor(
         sqlType: `${required(SQL_TYPE[element], `no SQL type for ${element}`)}[]`,
         notNull,
         field: f.key,
+        ...(f.default !== undefined ? { default: f.default } : {}),
         ...(guard ? { guard } : {}),
       });
       continue;
@@ -177,7 +186,7 @@ function columnsFor(
       notNull,
       field: f.key,
       ...(type === 'enum' ? { vocabulary: required(f.of, `${table}.${f.key} is an enum with no of:`) } : {}),
-      ...(f.unique ? { unique: true } : {}),
+      ...(f.default !== undefined ? { default: f.default } : {}),
       ...(guard ? { guard } : {}),
     });
   }
@@ -200,6 +209,16 @@ export function buildModel(types = loadTypes(), layout = loadLayout()): Model {
 
   const tables = new Map<string, Table>();
   const junctions: Junction[] = [];
+  const uniqueKeys: UniqueKey[] = [];
+
+  const collectUnique = (table: string, fields: readonly FieldSpec[]): void => {
+    for (const f of fields) {
+      if (f.unique_with === undefined) continue;
+      // The field itself is part of the key, and comes last: a weekly is
+      // identified by its period first and its date second.
+      uniqueKeys.push({ table, columns: [...f.unique_with, f.key] });
+    }
+  };
   const linkFields: LinkField[] = [];
   const inversesByTarget = new Map<string, Set<string>>();
 
@@ -229,12 +248,14 @@ export function buildModel(types = loadTypes(), layout = loadLayout()): Model {
   };
 
   // `record` carries the universal fields; one table per core type carries the rest.
+  collectUnique('record', types.universal);
   const universal = columnsFor('record', types.universal);
   tables.set('record', { name: 'record', type: '*', columns: universal.columns });
   junctions.push(...universal.junctions);
   collectLinks('*', types.universal);
 
   for (const t of types.types) {
+    collectUnique(tableName(t.id), t.fields ?? []);
     const built = columnsFor(tableName(t.id), t.fields ?? []);
     tables.set(t.id, { name: tableName(t.id), type: t.id, columns: built.columns });
     junctions.push(...built.junctions);
@@ -313,6 +334,7 @@ export function buildModel(types = loadTypes(), layout = loadLayout()): Model {
     vocabularies,
     tables,
     junctions,
+    uniqueKeys,
     linkFields,
     linkFieldRows,
     inversesByTarget,

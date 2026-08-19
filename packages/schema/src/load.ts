@@ -16,7 +16,10 @@ export type FieldSpec = {
   to?: string | string[];
   inverse?: string;
   required?: boolean | 'on-create';
-  unique?: boolean;
+  /** Present means the store always materialises a value; the column is NOT NULL. */
+  default?: unknown;
+  /** Unique in combination with these fields. An empty list means unique alone. */
+  unique_with?: string[];
   immutable?: boolean;
   system?: boolean;
   description?: string;
@@ -52,7 +55,7 @@ export type Types = {
   types: TypeSpec[];
   vocabularies: Record<string, VocabularySpec>;
   query: {
-    indexes: Array<{ class: string; fields: string[] | string; subtypes?: string[] }>;
+    indexes: Array<{ class: string; fields: string[] | string; subtype_vocabularies?: string[] }>;
     inverses: { by_target: Record<string, string[]> };
   };
   validation: { error: string[]; warn: string[]; info: string[] };

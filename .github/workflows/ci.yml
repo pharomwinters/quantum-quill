@@ -53,6 +53,9 @@ jobs:
       # the live schema changes anything, the commit is stale.
       - name: Generated types are up to date
         run: |
+          # kysely-codegen insists on an env file. DATABASE_URL is already set
+          # for the job and dotenv does not override what is already there.
+          cp .env.example .env
           npm run db:types
           git diff --exit-code -- packages/db/src/schema.d.ts \
             || { echo "::error::packages/db/src/schema.d.ts is stale — run npm run db:types"; exit 1; }
