@@ -1,7 +1,7 @@
 # Phase 1 — Implementation Plan
 
 **Date:** 2026-08-19
-**Status:** in progress · steps 1-3 done 2026-08-19
+**Status:** in progress · steps 1-12 done 2026-08-19, step 13 not taken
 **Implements:** [2026-08-18-service-design.md](2026-08-18-service-design.md) §8, phase 1
 
 Phase 1 is: **compose stack, numbered SQL migrations, DDL cross-check test
@@ -460,15 +460,15 @@ Each step ends with something you can run.
 | 1 | ~~Workspace skeleton: root `package.json`, `tsconfig.base.json`, `node:test` wiring~~ | **Done, 2026-08-19.** Node 22 type stripping, so no build step and no test framework |
 | 2 | ~~`packages/schema`: loaders, derived model, the two meta-tests~~ | **Done, 2026-08-19.** 10 tests green, and each verified to go red on a deliberate break |
 | 3 | ~~**Settle §3** — the `body`, `folder` and `date` questions, as edits to `types.yaml`~~ | **Done, 2026-08-19.** The YAML says what the DDL is about to assume |
-| 4 | Compose stack: `postgres` + `migrate` | `docker compose up -d` reaches healthy; `db:status` connects |
-| 5 | Migration runner | Applies from scratch; re-run is a no-op; editing an applied file fails loudly |
-| 6 | Migrations `0001`–`0005` | Apply clean on an empty database |
-| 7 | `db:sync` | Seeds 135 vocabulary values and 219 `link_field` rows; second run is a no-op; `--prune` of an in-use value is refused by the FK |
-| 8 | `constraints.test.ts` | Every phase-1 row of §6 has a case, and each one fires |
-| 9 | `crosscheck.test.ts` | Green — then deliberately broken four ways (stray column, dropped field, changed vocabulary value, widened column type) and seen to fail with a readable diff each time |
-| 10 | Kysely codegen → `schema.d.ts`, committed; CI fails if regeneration produces a diff | `npm run db:types` is a no-op on a clean tree |
-| 11 | CI: GitHub Actions, postgres service, `npm test` | Green on the branch |
-| 12 | Update `README.md` and `CLAUDE.md` — "there is no code here" stops being true | Both describe the toolchain that now exists |
+| 4 | ~~Compose stack: `postgres` + `migrate`~~ | **Done.** Images pinned by digest. Not run end-to-end: no Docker daemon available where this was built |
+| 5 | ~~Migration runner~~ | **Done.** 8 tests: ordering, idempotence, checksum drift, vanished file, bad filename, duplicate version, failed migration rolls back |
+| 6 | ~~Migrations `0001`–`0005`~~ | **Done.** Applied clean to an empty database on the first attempt |
+| 7 | ~~`db:sync`~~ | **Done.** 135 vocabulary values and 219 `link_field` rows, exactly as predicted; re-run is a no-op |
+| 8 | ~~`constraints.test.ts`~~ | **Done.** 20 cases; every phase-1 row of §6 fires, plus the four the rule list never named |
+| 9 | ~~`crosscheck.test.ts`~~ | **Done.** Green, and verified to fail on eight deliberate breaks |
+| 10 | ~~Kysely codegen → `schema.d.ts`, committed~~ | **Done.** 20 tables; CI regenerates and fails on any diff |
+| 11 | ~~CI: GitHub Actions, postgres service, `npm test`~~ | **Done.** Not yet observed green — this branch is its first run |
+| 12 | ~~Update `README.md` and `CLAUDE.md`~~ | **Done.** "There is no code here" stopped being true |
 
 **Optional, recommended, ~30 lines — step 13:** stand up the `app` service with
 nothing but `/healthz`, bound to **two** listeners. Not because phase 1 needs an
@@ -507,3 +507,47 @@ blocks step 6. Everything else is sequential.
    Phase 2, alongside question 3; the same mechanism answers both.
 5. **§5 of the service design** should be corrected once phase 1 measures what
    the DDL actually enforces — see §6.
+
+---
+
+## 14. What building it found
+
+The cross-check earned its place on its first run, before it had ever been
+deliberately broken: it failed twice against DDL written from the same model it
+compares against.
+
+| Found | Verdict |
+|---|---|
+| `record.body` and `record.tags` were `NOT NULL DEFAULT ''` | The DDL had invented a requirement. `types.yaml` declares neither field required, so the columns are nullable now. See the open question below |
+| A10 demanded an index on `document.gross_currency` and `document.period` | A bug in the check, not the DDL. It matched guarantees by bare field name; `period` is both the journal subtype vocabulary and a plain text field on a performance-review, and a money field's currency column is not the quantity the range guarantee is about |
+
+Three more surfaced while writing the tests.
+
+**A5 and A6 could not fail.** They compare the seeded `vocabulary` and
+`link_field` tables against the model that seeded them, so on a freshly synced
+database they agree by construction. The case they appear to cover — a database
+seeded months ago, a vocabulary edited yesterday, `sync` not yet run — was
+untested. Both are now paired with a test that drifts the live database inside
+a transaction and asserts the comparison notices.
+
+**`journal.date` is declared `unique: true`, and that forbids something real.**
+A daily entry for a Monday and a weekly anchored on that same Monday cannot
+coexist, because both are journals and both carry that date. The DDL implements
+what is declared and says so in a comment; widening it to `UNIQUE (period, date)`
+would be a schema decision made in SQL, which is the move this whole
+arrangement exists to prevent.
+
+**The query contract identifies fields by bare name, and names are not unique.**
+`period` is the case that bit. `status`, `date` and `result` are also declared
+on more than one type, but there the meaning is genuinely shared. A future
+reader of `query.indexes` cannot tell the two situations apart.
+
+### Open question this raises
+
+`body` and `tags` want to be nullable in the schema and never-null in storage.
+`required` means *the author must supply it*, which is not true of either; but
+an empty body is `''` and an absent tag list is `{}`, and a third state that
+means the same thing as one of the other two is worth nothing. The schema has
+no way to say "defaulted, never null" — which would be a new field attribute
+(`default:`), and inventing schema vocabulary is exactly what the method
+forbids doing on a hunch. Left as it stands, flagged rather than guessed at.

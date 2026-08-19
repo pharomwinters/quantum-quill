@@ -96,6 +96,14 @@ export type Model = {
 
 const LIST = /^list\[(.+)\]$/;
 
+/**
+ * Core type ids are kebab-case slugs; SQL identifiers are not. One rule, not a
+ * lookup table, and it touches exactly one type today (`world-entry`).
+ */
+export function tableName(typeId: string): string {
+  return typeId.replaceAll('-', '_');
+}
+
 function elementOf(type: string): string | null {
   const m = LIST.exec(type);
   return m?.[1] ?? null;
@@ -154,15 +162,10 @@ function columnsFor(
 
     if (type === 'money') {
       // "Decimal amount plus a currency code" is two values, paired by CHECK.
-      for (const [suffix, sql] of [['amount', 'numeric(14,2)'], ['currency', 'char(3)']] as const) {
-        columns.push({
-          table,
-          name: `${f.key}_${suffix}`,
-          sqlType: sql,
-          notNull,
-          field: f.key,
-          ...(guard ? { guard } : {}),
-        });
+      // The amount keeps the field's own name — `gross`, not `gross_amount` —
+      // so the common column reads as the field and only the currency is a suffix.
+      for (const [name, sql] of [[f.key, 'numeric(14,2)'], [`${f.key}_currency`, 'char(3)']] as const) {
+        columns.push({ table, name, sqlType: sql, notNull, field: f.key, ...(guard ? { guard } : {}) });
       }
       continue;
     }
@@ -232,8 +235,8 @@ export function buildModel(types = loadTypes(), layout = loadLayout()): Model {
   collectLinks('*', types.universal);
 
   for (const t of types.types) {
-    const built = columnsFor(t.id, t.fields ?? []);
-    tables.set(t.id, { name: t.id, type: t.id, columns: built.columns });
+    const built = columnsFor(tableName(t.id), t.fields ?? []);
+    tables.set(t.id, { name: tableName(t.id), type: t.id, columns: built.columns });
     junctions.push(...built.junctions);
     collectLinks(t.id, t.fields ?? []);
   }
@@ -245,6 +248,7 @@ export function buildModel(types = loadTypes(), layout = loadLayout()): Model {
     const parent = spec.parent;
     if (parent === undefined) continue;
     const table = required(tables.get(parent), `vocabulary ${name} has unknown parent ${parent}`);
+    const parentTable = table.name;
 
     const declaredBy = new Map<string, { field: FieldSpec; values: string[] }>();
     for (const value of spec.values) {
@@ -257,7 +261,7 @@ export function buildModel(types = loadTypes(), layout = loadLayout()): Model {
     }
 
     for (const { field, values } of declaredBy.values()) {
-      const built = columnsFor(parent, [{ ...field, required: false }], { field: name, values });
+      const built = columnsFor(parentTable, [{ ...field, required: false }], { field: name, values });
       table.columns.push(...built.columns);
       junctions.push(...built.junctions);
     }

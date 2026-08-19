@@ -9,11 +9,11 @@ it. The schema — `types.yaml` and `Folder-layout.yaml` — is the artifact; tw
 implementations have already been written and discarded (see **Discarded
 architectures**) and neither moved it.
 
-Phase 1 is under way. What exists in `packages/` today is `schema`: the two
-YAML files loaded and derived into a model, plus the meta-tests that hold the
-files to their own contracts. There is still no database, no HTTP surface and
-no records — see **Next step** for what lands next, and do not assume anything
-beyond `packages/schema` is missing rather than unbuilt.
+Phase 1 is built. `packages/schema` loads the two YAML files and derives a
+model of what the database must look like; `packages/db` holds the numbered SQL
+migrations, the runner, the vocabulary sync and the cross-check. There is still
+no HTTP surface and no records — creating one is phase 3. Do not assume
+anything beyond those two packages is missing rather than unbuilt.
 
 ## The method, which governs how you should change things
 
@@ -109,9 +109,16 @@ one more place for the two to disagree.
 
 ```bash
 npm install
-npm test          # every packages/*/test/**/*.test.ts
-npm run typecheck # tsc --noEmit
+npm test               # every packages/*/test/**/*.test.ts — needs DATABASE_URL
+npm run typecheck      # tsc --noEmit
+npm run db status      # migrate | sync | status | migrate-and-sync
+npm run db:types       # regenerate the committed Kysely types
+docker compose up -d   # postgres, then a one-shot migrate-and-sync
 ```
+
+Tests build their own scratch database per file from the migrations and drop
+it afterwards, so `npm test` never touches the dev database — and a schema
+hand-patched outside a migration cannot make the cross-check pass.
 
 ```powershell
 # Build the folder tree from the layout file (idempotent; -WhatIf to preview)
@@ -161,13 +168,18 @@ test). It found nine schema defects before being retired — that work is why th
 
 ## Next step
 
-**Phase 1: the compose stack, numbered SQL migrations, and the DDL cross-check
-test.** Planned in detail in
-[`docs/design/2026-08-19-phase-1-implementation-plan.md`](docs/design/2026-08-19-phase-1-implementation-plan.md),
-which carries the work plan, the DDL decisions and their rationale. Steps 1-3
-of that plan are done: the schema questions the DDL forced open are settled in
-`types.yaml`, and `packages/schema` with its meta-tests exists. The migration
-runner and the DDL are next.
+**Phase 2: `core` in TypeScript — the rules Postgres cannot enforce, and the
+import derivations.**
+
+Phase 1 is done;
+[`docs/design/2026-08-19-phase-1-implementation-plan.md`](docs/design/2026-08-19-phase-1-implementation-plan.md)
+carries what it decided and, in §14, what building it found. What phase 2
+inherits: the three cross-row triggers, the state machines, and every rule
+about a link's PRESENCE — `world-entry.appears_in`, `group.members` and
+`meeting.attended` are all declared required and none can be `NOT NULL`,
+because links are rows. `packages/db/test/constraints.test.ts` names all 28
+rules and says which phase owns each; keep it accurate, since a rule that is
+neither enforced nor accounted for fails the suite.
 
 The cross-check is the load-bearing piece. It asserts the live Postgres schema
 and `types.yaml` agree in both directions — a column with no field fails, a

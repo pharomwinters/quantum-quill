@@ -4,14 +4,21 @@
   "private": true,
   "type": "module",
   "description": "A typed personal information manager, built to the schema in types.yaml",
-  "workspaces": ["packages/*"],
-  "engines": { "node": ">=22.6" },
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.6"
+  },
   "scripts": {
     "test": "node --disable-warning=ExperimentalWarning --experimental-strip-types --test \"packages/*/test/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "db": "node --disable-warning=ExperimentalWarning --experimental-strip-types packages/db/src/cli.ts",
+    "db:types": "kysely-codegen --dialect postgres --out-file packages/db/src/schema.d.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "kysely-codegen": "^0.17.0",
     "typescript": "^5.8.0"
   }
 }
