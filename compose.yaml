@@ -1,0 +1,45 @@
+# Phase 1: Postgres, and a one-shot that brings its schema up to date.
+#
+# `app`, `projector`, `scheduler` and `ingest` arrive in phases 3, 4, 7 and 6.
+# The two listeners the service design calls for are a property of `app`, so
+# they are not modelled here yet — see docs/design/2026-08-18-service-design.md.
+
+name: quantum-quill
+
+services:
+  postgres:
+    # Pinned by digest: a tag moves, and a database that silently changes major
+    # version is the one upgrade you never meant to run.
+    image: postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vault}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-vault}
+    ports:
+      # Loopback only. Reachability is the tunnel's job, not the database's.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vault} -d ${POSTGRES_DB:-vault}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # One-shot: apply pending migrations, sync the vocabularies, exit.
+    command: ["migrate-and-sync"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-vault}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vault}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  pgdata:

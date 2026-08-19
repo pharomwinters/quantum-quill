@@ -1,0 +1,9 @@
+{
+  "name": "@quantum-quill/schema",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "types.yaml and Folder-layout.yaml, loaded and derived into a model the rest of the service is checked against",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "yaml": "^2.6.0" }
+}

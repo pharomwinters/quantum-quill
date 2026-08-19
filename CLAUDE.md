@@ -2,16 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Orient yourself first: there is no code here
+## Orient yourself first: the schema is the product, the code serves it
 
-This repository is a **specification**, not an application. Seven files: two
-schema YAMLs, two design documents, a PowerShell scaffolder, a README and this
-file. No `package.json`, no source tree, no tests, no build.
-
-That is the current, intended state — not an incomplete checkout. Two
+This repository is a **specification** with the beginning of a service built to
+it. The schema — `types.yaml` and `Folder-layout.yaml` — is the artifact; two
 implementations have already been written and discarded (see **Discarded
-architectures**), and both were discarded before the schema moved. Do not go
-looking for an implementation, and do not assume one is missing.
+architectures**) and neither moved it.
+
+Phase 1 is built. `packages/schema` loads the two YAML files and derives a
+model of what the database must look like; `packages/db` holds the numbered SQL
+migrations, the runner, the vocabulary sync and the cross-check. There is still
+no HTTP surface and no records — creating one is phase 3. Do not assume
+anything beyond those two packages is missing rather than unbuilt.
 
 ## The method, which governs how you should change things
 
@@ -100,20 +102,32 @@ filing time and makes the obvious query unanswerable.
 
 ## Commands
 
-There is no build or test tooling yet. What exists:
+Node 22.6+ is required: tests run TypeScript directly through Node's type
+stripping, so there is no build step and no test framework. Both are
+deliberate — a compile step between the schema and the tests that check it is
+one more place for the two to disagree.
+
+```bash
+npm install
+npm test               # every packages/*/test/**/*.test.ts — needs DATABASE_URL
+npm run typecheck      # tsc --noEmit
+npm run db status      # migrate | sync | status | migrate-and-sync
+npm run db:types       # regenerate the committed Kysely types
+docker compose up -d   # postgres, then a one-shot migrate-and-sync
+```
+
+Tests build their own scratch database per file from the migrations and drop
+it afterwards, so `npm test` never touches the dev database — and a schema
+hand-patched outside a migration cannot make the cross-check pass.
 
 ```powershell
 # Build the folder tree from the layout file (idempotent; -WhatIf to preview)
 .\New-VaultTree.ps1 -LayoutFile .\Folder-layout.yaml -Root D:\vault -WhatIf
 ```
 
-```bash
-# Sanity-check both schema files parse
-python -c "import yaml; yaml.safe_load(open('types.yaml',encoding='utf-8')); yaml.safe_load(open('Folder-layout.yaml',encoding='utf-8')); print('ok')"
-```
-
-Phase 1 (below) introduces the real toolchain: npm workspaces, numbered `.sql`
-migrations, and the DDL cross-check test.
+**Adding a test that cannot fail is worse than adding none.** Every check in
+this repository exists to catch drift between two independently derived things,
+so break the schema on purpose and watch the test go red before trusting it.
 
 ## Current architecture (designed, not built)
 
@@ -154,8 +168,18 @@ test). It found nine schema defects before being retired — that work is why th
 
 ## Next step
 
-**Phase 1: the compose stack, numbered SQL migrations, and the DDL cross-check
-test.**
+**Phase 2: `core` in TypeScript — the rules Postgres cannot enforce, and the
+import derivations.**
+
+Phase 1 is done;
+[`docs/design/2026-08-19-phase-1-implementation-plan.md`](docs/design/2026-08-19-phase-1-implementation-plan.md)
+carries what it decided and, in §14, what building it found. What phase 2
+inherits: the three cross-row triggers, the state machines, and every rule
+about a link's PRESENCE — `world-entry.appears_in`, `group.members` and
+`meeting.attended` are all declared required and none can be `NOT NULL`,
+because links are rows. `packages/db/test/constraints.test.ts` names all 28
+rules and says which phase owns each; keep it accurate, since a rule that is
+neither enforced nor accounted for fails the suite.
 
 The cross-check is the load-bearing piece. It asserts the live Postgres schema
 and `types.yaml` agree in both directions — a column with no field fails, a

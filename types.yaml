@@ -9,11 +9,12 @@
 #  body is commentary and `file:` points at the payload beside it.
 #
 #  Every record carries a permanent `id` slug. Links point at ids, so renaming,
-#  retitling, moving and archiving never break a reference. A SQLite index may
-#  be built over all of this for query speed — derived, disposable, and never
-#  the source of truth.
+#  retitling, moving and archiving never break a reference. Postgres holds the
+#  records and a projector renders them back out as markdown — see
+#  docs/design — but this file is the specification both are built to and is
+#  owned by neither.
 #
-#  58 type names in the layout collapse here to 12 core types and 50 subtype
+#  67 type names in the layout collapse here to 14 core types and 82 subtype
 #  values. Adding a new kind of document is a vocabulary edit, not a schema
 #  change.
 #
@@ -22,7 +23,7 @@
 meta:
   name: vault
   version: 1
-  updated: 2026-08-17
+  updated: 2026-08-19
   companion: Folder-layout.yaml
 
 # -----------------------------------------------------------------------------
@@ -96,6 +97,31 @@ field_types:
     migrating from one representation to another — see `person.organization`.
 
 # -----------------------------------------------------------------------------
+#  FIELD ATTRIBUTES — what may be said about a field, beyond its type
+# -----------------------------------------------------------------------------
+
+field_attributes:
+  required: >
+    The author must supply a value. `on-create` means required when creating a
+    record but only a warning on records that predate the schema.
+  default: >
+    The store materialises this value when the author supplies none, and the
+    field is therefore never absent. Distinct from `required`, which is a
+    demand on the author: `body` is never required and never missing.
+  unique_with: >
+    The field is unique in combination with the fields named. `unique_with: []`
+    means unique on its own.
+  immutable: Never changes after creation. Only `id`.
+  system: Written by the store, never hand-edited.
+  of: The closed vocabulary an `enum` draws from.
+  to: The types a `link` may point at. `"*"` means any core type.
+  inverse: >
+    The name of the reverse edge, which is derived and never written. Must be
+    unique on the TARGET type, not globally.
+  symmetric: The link is its own inverse. Only `related`.
+  derived_from: Where the value comes from when it is not authored.
+
+# -----------------------------------------------------------------------------
 #  UNIVERSAL FIELDS — present on every record of every type
 # -----------------------------------------------------------------------------
 
@@ -124,17 +150,44 @@ universal:
       of truth that drift. Present in frontmatter only as a deliberate
       override. Free to change; `id` does not follow it.
 
+  - key: body
+    type: longtext
+    default: ""
+    description: >
+      Everything below the frontmatter — see `conventions.body`. Declared as a
+      field because it is one: the query contract full-text indexes it, and a
+      store that is not a file has to give it somewhere to live. It was
+      omitted only because in a file-based system the body was whatever the
+      frontmatter was not, and so needed no declaration. Never parsed for
+      data; an empty body is valid — which is what `default` says and
+      `required` could not: the author is never asked for a body, and a record
+      never lacks one. An absent body and an empty body are the same thing, and
+      a store with a third state for it would be storing a distinction that
+      does not exist.
+
   - key: created
-    type: date
+    type: datetime
     required: true
     system: true
-    description: Stamped at creation. Never hand-edited.
+    description: >
+      Stamped at creation. Never hand-edited. An instant rather than a date:
+      a file-based vault was written by hand a few times a day, and a service
+      writes whenever it is asked to. `date` could not order two records made
+      the same afternoon.
 
   - key: updated
-    type: date
+    type: datetime
     system: true
-    description: Stamped on write.
+    description: >
+      Stamped on write. An instant, for the same reason as `created` — and
+      more sharply, since "what changed since I last looked" is a question
+      about an afternoon, not about a day.
 
+  # `created` and `updated` were widened from `date` on 2026-08-19, before any
+  # SQL existed, because the store stopped being a filesystem. The two other
+  # system-stamped dates deliberately did NOT follow: nothing asks when in the
+  # day a task was finished, and 24 real tasks already carry a date-only
+  # `completedDate`.
   - key: archived_on
     type: date
     system: true
@@ -159,9 +212,12 @@ universal:
 
   - key: tags
     type: list[text]
+    default: []
     description: >
       Free-form labels. Deliberately unvalidated: the closed vocabularies
       carry the meaning, and tags carry everything not worth formalising.
+      Defaulted for the same reason as `body`: no tags is an empty list, not a
+      missing one.
 
 # -----------------------------------------------------------------------------
 #  ROUTING — which folder a record belongs in
@@ -508,9 +564,15 @@ types:
       - key: date
         type: date
         required: true
-        unique: true
+        unique_with: [period]
         description: >
           The anchor date. For a weekly, the Monday the week starts on.
+
+          Unique per PERIOD, not outright. A weekly is anchored on the Monday
+          it starts, and that Monday usually also has a daily — so a bare
+          uniqueness constraint on the date would make the two mutually
+          exclusive every week of the year. The date identifies an entry only
+          once you know which kind of entry it is.
 
   # ===========================================================================
   - id: meeting
@@ -1295,8 +1357,17 @@ query:
       fields: [id]
     - class: exact
       fields: [type, folder, status, state, priority, scope]
-      subtypes: [doc_type, resource_type, note_type, period, entry_type, system_type]
-      note: Every closed vocabulary is exact-indexed. That is what closing it buys.
+      subtype_vocabularies: [doc_type, resource_type, note_type, period,
+                             entry_type, system_type]
+      note: >
+        Every closed vocabulary is exact-indexed. That is what closing it buys.
+
+        These name VOCABULARIES, not fields, and the distinction is load-bearing
+        rather than pedantic: field names are not unique across types. `period`
+        is the journal's subtype vocabulary AND a plain text field on a
+        performance-review document, and only the first is guaranteed
+        queryable. Reading this list as field names indexes the wrong column.
+        Renamed from `subtypes` for that reason — the values never changed.
     - class: range
       fields: [created, updated, doc_date, date, due, scheduled, start, end,
                met, coverage_start, coverage_end, expires, valid_until,
@@ -1385,13 +1456,16 @@ import:
         rather than read.
 
     - field: meeting.date
-      source: created
+      source: date part of `created`
       covers: 14
       note: >
         Real meetings carry only `created`. Usually the same day, but not
         always — a meeting written up the next morning has a true date and a
         later `created`. The schema keeps them distinct and seeds one from
-        the other rather than collapsing them the way the old tool did.
+        the other rather than collapsing them the way the old tool did. Now
+        that `created` is a `datetime`, this is a truncation and not a copy:
+        take the date part in the vault's local zone, not in UTC, or a
+        meeting written up late in the evening moves to tomorrow.
 
     - field: journal.date
       source: filename
@@ -1503,6 +1577,30 @@ validation:
 # -----------------------------------------------------------------------------
 
 open_questions:
+  - id: folder-storage
+    raised: 2026-08-19
+    question: >
+      Is `folder` a stored derived column on the record, or a view computed
+      from the routing rules on read?
+    evidence: >
+      `query.indexes` guarantees `folder` is exact-indexed, and
+      `lifecycle.archive` preserves `jd` — but no type declares either as a
+      field, because both are DERIVED: routing computes them from `type`,
+      the subtype value, and `attaches_to`. In a file-based vault the
+      question could not arise, since the path was the storage.
+    why_unresolved: >
+      Both answers are defensible and the deciding evidence does not exist
+      yet. Stored is a cache, and a cache of a pure function of three columns
+      is only worth it if reads are hot and re-derivation is slow — neither
+      of which is measurable before records exist. Computed cannot go stale,
+      but a container-relative route resolves against another RECORD rather
+      than against the layout, so the view has to join, and `world-entry`
+      routes through its world.
+    unblocks: nothing today — the router does not exist until phase 2
+    decide_by: >
+      Phase 4. The projector has to write the real path anyway, so it is the
+      first thing that has an opinion worth having.
+
   - id: resource-status
     raised: 2026-08-17
     question: Should `resource` carry a status field?

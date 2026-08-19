@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+        env:
+          POSTGRES_USER: vault
+          POSTGRES_PASSWORD: vault
+          POSTGRES_DB: vault
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U vault"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://vault:vault@localhost:5432/vault
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Every test builds its own scratch database from the migrations, so this
+      # only has to prove the migrations apply to an empty server at all.
+      - name: Migrate and seed
+        run: npm run db migrate-and-sync
+
+      # The schema meta-tests, the migration runner, the constraint tests and
+      # the DDL cross-check.
+      - name: Test
+        run: npm test
+
+      # The generated Kysely types are committed. If regenerating them against
+      # the live schema changes anything, the commit is stale.
+      - name: Generated types are up to date
+        run: |
+          # kysely-codegen insists on an env file. DATABASE_URL is already set
+          # for the job and dotenv does not override what is already there.
+          cp .env.example .env
+          npm run db:types
+          git diff --exit-code -- packages/db/src/schema.d.ts \
+            || { echo "::error::packages/db/src/schema.d.ts is stale — run npm run db:types"; exit 1; }

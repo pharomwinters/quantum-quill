@@ -12,7 +12,7 @@ taxonomy shaped by whatever the tools happened to do.
 | File | Answers |
 |---|---|
 | [`Folder-layout.yaml`](Folder-layout.yaml) | Where a record lives — Johnny Decimal areas, PARA inside the typed zone, routing, filing rules |
-| [`types.yaml`](types.yaml) | What a record is — 14 core types, 130 vocabulary values, lifecycle, the query contract, validation rules |
+| [`types.yaml`](types.yaml) | What a record is — 14 core types, 135 vocabulary values, lifecycle, the query contract, validation rules |
 
 Folders and records are identified by permanent kebab-case slugs. Johnny Decimal
 numbers are *addresses*, not keys, so renumbering, moving and archiving never
@@ -40,7 +40,22 @@ found nine defects in it. That is why the `derived` column is not empty.
 
 ## The service
 
-Designed, not yet built. See [`docs/design/`](docs/design/).
+Phase 1 is built: Postgres, the migrations, and the test that holds the two
+together. Nothing creates a record yet — that is phase 3.
+
+```bash
+cp .env.example .env      # set POSTGRES_PASSWORD
+docker compose up -d
+npm ci && npm test
+```
+
+The schema is hand-written SQL in `packages/db/migrations`, and
+`packages/db/test/crosscheck.test.ts` asserts it agrees with `types.yaml` in
+both directions — a column with no field fails, a field with no column fails,
+a vocabulary whose values differ fails. Without that test, `types.yaml` would
+quietly stop being an executable specification the moment SQL existed beside
+it. The plan and its rationale are in
+[`docs/design/2026-08-19-phase-1-implementation-plan.md`](docs/design/2026-08-19-phase-1-implementation-plan.md).
 
 An always-on service on a homeserver: **Postgres as the source of truth**, with
 a projector that renders every change back out to the Johnny Decimal tree as
@@ -52,8 +67,9 @@ validation rules from *detection* into *prevention* — `duplicate-id` becomes a
 primary key, `unresolvable-link` a foreign key — and dissolves four more
 outright.
 
-| Design | Status |
+| Document | Status |
 |---|---|
+| [2026-08-19 — Phase 1 implementation plan](docs/design/2026-08-19-phase-1-implementation-plan.md) | proposed |
 | [2026-08-18 — Service design](docs/design/2026-08-18-service-design.md) | current |
 | [2026-08-17 — Application design](docs/design/2026-08-17-application-design.md) | superseded |
 
