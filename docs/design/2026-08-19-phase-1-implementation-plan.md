@@ -1,7 +1,7 @@
 # Phase 1 — Implementation Plan
 
 **Date:** 2026-08-19
-**Status:** proposed
+**Status:** proposed · §3 settled 2026-08-19
 **Implements:** [2026-08-18-service-design.md](2026-08-18-service-design.md) §8, phase 1
 
 Phase 1 is: **compose stack, numbered SQL migrations, DDL cross-check test
@@ -84,46 +84,52 @@ cannot quietly break them.
 
 ---
 
-## 3. Three schema questions the DDL forces open
+## 3. Three schema questions the DDL forced open — settled
 
-The DDL is not where the schema gets edited. Each of these needs a decision in
-`types.yaml` **before** migration `0002` is written, or the cross-check will be
-born with exemptions in it.
+The DDL is not where the schema gets edited, so these were settled in
+`types.yaml` first, before a line of SQL exists to be wrong. All three landed
+on 2026-08-19; both files still parse, all 65 routing keys still resolve, and
+the inverse registry still matches.
 
-### 3.1 `body` is a column with no field
+### 3.1 `body` is a column with no field — **added**
 
-`conventions.body` describes it, `query.indexes` full-text indexes it, and the
-service design's data model has it — but `universal:` does not declare it, so a
-`record.body` column fails the cross-check on day one.
+`conventions.body` described it, `query.indexes` full-text indexed it, and the
+service design's data model had it, but `universal:` did not declare it. A
+`record.body` column would have failed the cross-check on day one.
 
-> **Recommended:** add `body` to `universal:` as `type: longtext`, not required,
-> with the existing `conventions.body` prose as its description. Reality has it;
-> there is no principled reason for the omission. This is the `outcome → result`
-> move.
+`body: longtext` is now a universal field. The omission had a cause and not a
+reason: in a file-based vault the body was whatever the frontmatter was not, so
+nothing had to declare it. A store that is not a file has to give it somewhere
+to live. All three fields in the text index class — `title`, `body`, `tags` —
+are now declared fields, which they were not before.
 
-### 3.2 `folder` is guaranteed queryable but is not a field
+### 3.2 `folder` is guaranteed queryable but is not a field — **question opened**
 
-`query.indexes` exact-indexes `folder`, and `lifecycle.archive` preserves `jd`.
-Neither is a declared field on any type. They are **derived** — routing computes
-the folder from type, subtype and `attaches_to`.
+`query.indexes` exact-indexes `folder` and `lifecycle.archive` preserves `jd`,
+yet neither is declared on any type, because both are **derived**: routing
+computes them from `type`, the subtype value and `attaches_to`.
 
-> **Recommended:** do not add a column in phase 1. The router does not exist
-> until phase 2 and the tree does not exist until phase 4; a nullable `folder`
-> column now is a cache with nothing to fill it. Record it as an open question
-> in `types.yaml` — *is `folder` a stored derived column or a computed view?* —
-> to be decided by phase 4, which is the phase that has to write the path anyway.
+No column in phase 1. `open_questions.folder-storage` now records the choice —
+stored derived column, or a view computed on read — with what makes it hard
+(container-relative routes resolve against another *record*, so the computed
+form has to join) and who decides: phase 4, which has to write the real path
+anyway. This is the `resource-status` treatment: record the question, do not
+invent a way to close it.
 
-### 3.3 `created` and `updated` are `date`, and a service writes more than once a day
+### 3.3 `created` and `updated` were `date` — **widened to `datetime`**
 
-`types.yaml` declares both as `date`. That was true of a file-based system. A
-service that writes on every edit and orders "what changed" by `updated` will
-want `datetime`, which is already a declared field type.
+Both are now `datetime`, mapping to `timestamptz`. A file-based vault was
+written by hand a few times a day; a service writes whenever it is asked to,
+and `date` cannot order two records made the same afternoon.
 
-> **Recommended:** build to `date`, exactly as declared. Do **not** widen it in
-> the DDL — a schema change made in SQL is precisely the drift the cross-check
-> exists to catch, and it would be caught, correctly, as a type mismatch. Raise
-> it as an open question against phase 3, which is the first phase with enough
-> real writes to know whether within-day ordering is actually wanted.
+Two consequences recorded alongside the change:
+
+- **`archived_on` and `task.completed` deliberately stay `date`.** Nothing asks
+  when in the day a task was finished, and 24 real tasks already carry a
+  date-only `completedDate`. Reality outranks consistency-for-its-own-sake.
+- **`import.derived` for `meeting.date` is now a truncation, not a copy** —
+  taken in the vault's local zone, or a meeting written up late in the evening
+  lands on tomorrow. The rule now says so.
 
 ### Also, minor
 
@@ -200,9 +206,9 @@ CREATE TABLE record (
   type        text NOT NULL,
   type_vocab  text NOT NULL GENERATED ALWAYS AS ('core_type') STORED,
   title       text,
-  body        text NOT NULL DEFAULT '',          -- pending §3.1
-  created     date NOT NULL,
-  updated     date,
+  body        text NOT NULL DEFAULT '',
+  created     timestamptz NOT NULL,
+  updated     timestamptz,
   archived_on date,
   tags        text[] NOT NULL DEFAULT '{}',
   FOREIGN KEY (type_vocab, type) REFERENCES vocabulary(name, value),
@@ -394,7 +400,7 @@ via `pg_get_constraintdef`, index definitions, and the live contents of
 |---|---|---|
 | A1 | Table set == core type set | a table with no type, a type with no table |
 | A2 | Column set per table == field set | a column with no field, a field with no column |
-| A3 | Column SQL type == field type's mapping | `updated` widened to `timestamptz` in SQL |
+| A3 | Column SQL type == field type's mapping | `doc_date` stored as `timestamptz`, or `tax_year` as `text` |
 | A4 | `NOT NULL` iff `required: true` | a required field left nullable |
 | A5 | `vocabulary` rows == YAML values, per name, both directions | a `doc_type` added to SQL but not YAML |
 | A6 | `link_field` rows == declared link fields × targets | a link field with no registry row |
@@ -446,7 +452,7 @@ Each step ends with something you can run.
 |---|---|---|
 | 1 | Workspace skeleton: root `package.json`, `tsconfig.base.json`, `node:test` wiring | `npm test` runs and reports zero failures |
 | 2 | `packages/schema`: loaders, derived model, the two meta-tests | Both meta-tests pass against the YAML as it stands today |
-| 3 | **Settle §3** — the `body`, `folder` and `date` questions, as edits to `types.yaml` | The YAML says what the DDL is about to assume |
+| 3 | ~~**Settle §3** — the `body`, `folder` and `date` questions, as edits to `types.yaml`~~ | **Done, 2026-08-19.** The YAML says what the DDL is about to assume |
 | 4 | Compose stack: `postgres` + `migrate` | `docker compose up -d` reaches healthy; `db:status` connects |
 | 5 | Migration runner | Applies from scratch; re-run is a no-op; editing an applied file fails loudly |
 | 6 | Migrations `0001`–`0005` | Apply clean on an empty database |
@@ -483,9 +489,9 @@ blocks step 6. Everything else is sequential.
 
 ## 13. Open questions this plan raises
 
-1. **`folder` as a stored column or a computed view** — §3.2. Decide by phase 4.
-2. **`created` / `updated` as `date` or `datetime`** — §3.3. Decide by phase 3,
-   with real write traffic as the evidence.
+1. ~~**`folder` as a stored column or a computed view**~~ — opened as
+   `open_questions.folder-storage` in `types.yaml`. Decide by phase 4.
+2. ~~**`created` / `updated` as `date` or `datetime`**~~ — settled: `datetime`.
 3. **Required links** (`group.members`, `meeting.attended`,
    `world-entry.appears_in`) — trigger, deferred constraint, or app rule?
    Phase 2 decides; phase 1 only has to not pretend they are enforced.

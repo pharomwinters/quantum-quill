@@ -22,7 +22,7 @@
 meta:
   name: vault
   version: 1
-  updated: 2026-08-17
+  updated: 2026-08-19
   companion: Folder-layout.yaml
 
 # -----------------------------------------------------------------------------
@@ -124,17 +124,39 @@ universal:
       of truth that drift. Present in frontmatter only as a deliberate
       override. Free to change; `id` does not follow it.
 
+  - key: body
+    type: longtext
+    description: >
+      Everything below the frontmatter — see `conventions.body`. Declared as a
+      field because it is one: the query contract full-text indexes it, and a
+      store that is not a file has to give it somewhere to live. It was
+      omitted only because in a file-based system the body was whatever the
+      frontmatter was not, and so needed no declaration. Never parsed for
+      data; an empty body is valid.
+
   - key: created
-    type: date
+    type: datetime
     required: true
     system: true
-    description: Stamped at creation. Never hand-edited.
+    description: >
+      Stamped at creation. Never hand-edited. An instant rather than a date:
+      a file-based vault was written by hand a few times a day, and a service
+      writes whenever it is asked to. `date` could not order two records made
+      the same afternoon.
 
   - key: updated
-    type: date
+    type: datetime
     system: true
-    description: Stamped on write.
+    description: >
+      Stamped on write. An instant, for the same reason as `created` — and
+      more sharply, since "what changed since I last looked" is a question
+      about an afternoon, not about a day.
 
+  # `created` and `updated` were widened from `date` on 2026-08-19, before any
+  # SQL existed, because the store stopped being a filesystem. The two other
+  # system-stamped dates deliberately did NOT follow: nothing asks when in the
+  # day a task was finished, and 24 real tasks already carry a date-only
+  # `completedDate`.
   - key: archived_on
     type: date
     system: true
@@ -1385,13 +1407,16 @@ import:
         rather than read.
 
     - field: meeting.date
-      source: created
+      source: date part of `created`
       covers: 14
       note: >
         Real meetings carry only `created`. Usually the same day, but not
         always — a meeting written up the next morning has a true date and a
         later `created`. The schema keeps them distinct and seeds one from
-        the other rather than collapsing them the way the old tool did.
+        the other rather than collapsing them the way the old tool did. Now
+        that `created` is a `datetime`, this is a truncation and not a copy:
+        take the date part in the vault's local zone, not in UTC, or a
+        meeting written up late in the evening moves to tomorrow.
 
     - field: journal.date
       source: filename
@@ -1503,6 +1528,30 @@ validation:
 # -----------------------------------------------------------------------------
 
 open_questions:
+  - id: folder-storage
+    raised: 2026-08-19
+    question: >
+      Is `folder` a stored derived column on the record, or a view computed
+      from the routing rules on read?
+    evidence: >
+      `query.indexes` guarantees `folder` is exact-indexed, and
+      `lifecycle.archive` preserves `jd` — but no type declares either as a
+      field, because both are DERIVED: routing computes them from `type`,
+      the subtype value, and `attaches_to`. In a file-based vault the
+      question could not arise, since the path was the storage.
+    why_unresolved: >
+      Both answers are defensible and the deciding evidence does not exist
+      yet. Stored is a cache, and a cache of a pure function of three columns
+      is only worth it if reads are hot and re-derivation is slow — neither
+      of which is measurable before records exist. Computed cannot go stale,
+      but a container-relative route resolves against another RECORD rather
+      than against the layout, so the view has to join, and `world-entry`
+      routes through its world.
+    unblocks: nothing today — the router does not exist until phase 2
+    decide_by: >
+      Phase 4. The projector has to write the real path anyway, so it is the
+      first thing that has an opinion worth having.
+
   - id: resource-status
     raised: 2026-08-17
     question: Should `resource` carry a status field?
