@@ -1,7 +1,7 @@
 # Phase 2 — Implementation Plan
 
 **Date:** 2026-08-20
-**Status:** not started
+**Status:** in progress · step 1 done 2026-08-20
 **Implements:** [2026-08-18-service-design.md](2026-08-18-service-design.md) §8, phase 2
 **Follows:** [2026-08-19-phase-1-implementation-plan.md](2026-08-19-phase-1-implementation-plan.md)
 
@@ -86,7 +86,7 @@ without `core` becoming wrong, it is deferred.
 These come first, and not out of tidiness. The first one blocks every other
 line of phase 2, and the other three get cheaper the earlier they are done.
 
-### 2.1 The loader does not declare half of what phase 2 reads — **blocking**
+### 2.1 The loader does not declare half of what phase 2 reads — **blocking** · done
 
 `packages/schema/src/load.ts` types `Types` with `meta`, `field_types`,
 `universal`, `routing`, `types`, `vocabularies`, `query`, `validation`,
@@ -463,3 +463,83 @@ green for a reason that had nothing to do with correctness.
 4. **`folder-storage` remains open, as designed.** The router being pure keeps
    both answers available. Still phase 4's call — it has to write the real path
    anyway.
+
+---
+
+## 9. What step 1 found
+
+**The drift was twice as wide as §2.1 described.** §2.1 named `lifecycle`,
+`import` and `routing.explicit`. Measured, `Types` declared **8 of the 18**
+top-level blocks in `types.yaml` and `Layout` **4 of the 7** in
+`Folder-layout.yaml`. Also absent: `provenance_levels`, `provenance_review`,
+`conventions`, `field_attributes`, `containers`, `stubs` — and, on the layout
+side, `conventions`, `tombstones`, `excluded`. `open_questions` was typed with
+2 of its 7 keys and `query.indexes` with 3 of its 6.
+
+Nothing was wrong with any of it, which is the point: a cast cannot fail, so
+none of it was ever going to surface on its own.
+
+### How it is held now
+
+`TYPES_KEYS`, `LAYOUT_KEYS` and `FIELD_ATTRIBUTE_KEYS` are runtime lists,
+checked in both directions:
+
+- **At compile time**, against the TypeScript type. An `Exact<>` helper
+  resolves to `never` when the list and the type disagree, so the assignment
+  fails to compile — proved by adding a key to `Types` alone, to the list
+  alone, and by shortening `LAYOUT_KEYS`.
+- **At test time**, against the file. `packages/schema/test/load.test.ts`
+  compares each list to `Object.keys()` of the parsed YAML — proved by adding
+  a block to `types.yaml`, removing `stubs`, and removing `tombstones` from the
+  layout.
+
+Neither half is sufficient alone. The compile-time proof says the list matches
+what we declare; the test says what we declare matches what exists.
+
+`FieldSpec` gets a stronger version of the same check, because the file
+declares its own field-attribute vocabulary: `field_attributes` has 10 entries,
+and `FieldSpec` must carry exactly those beyond `key`, `type` and
+`description`. That is not a hand-copied expectation — it is the schema
+checking itself, and it caught `symmetric` and `derived_from` missing from the
+type.
+
+Nested shapes are guarded more weakly: a no-undeclared-keys test over the six
+collections phase 2 reads (`machines`, `transitions`, `guards`,
+`routing.explicit`, `import.derived`, `open_questions`). It catches the file
+gaining a key, which is the drift that actually happened, but it is a second
+hand-derivation rather than a proof. Stated so it is not mistaken for one.
+
+All eleven deliberate breaks were watched failing before any of this was
+trusted.
+
+### A schema question step 1 raised — for §3
+
+The attribute check went red on its first run, on a real defect:
+
+> `resource_type: software-license` adds
+> `{ key: license_key, type: text, sensitive: true }`, and `field_attributes`
+> declares no `sensitive` attribute.
+
+Sensitivity is **folder-scoped everywhere else in the project**: the layout
+marks *categories* sensitive (`31`, `34`, `36`), `sensitive-not-scanned`
+excludes those folders from the text index, and the service design binds them
+to a LAN-only listener. This is the only field-level use in either file, and
+`software-license` routes to **`38 Purchases, Warranties & Licenses`, which is
+not sensitive** — so the attribute claims a protection no mechanism delivers.
+
+Three ways out, none taken here: declare `sensitive` as a field attribute and
+give it a mechanism; drop it as a stray; or mark the category sensitive and let
+the existing folder-scoped machinery cover it. It is recorded as a registered
+exemption in `load.test.ts`, under the same two rules as
+`packages/db/test/exemptions.ts` — an entry that stops matching anything fails
+the suite, so it cannot quietly become permanent.
+
+**This wants an `open_questions` entry in `types.yaml`**, which is a schema
+edit and therefore step 5's business, not step 1's.
+
+### Caveats
+
+- Verified against **PostgreSQL 16**, not the 18 that compose and CI pin. Step
+  1 touches no SQL, so the exposure is small — but phase 1 §14 established that
+  CI is the authority for anything version-sensitive, and that has not changed.
+- Full suite: **71 tests green**, up from 60.
